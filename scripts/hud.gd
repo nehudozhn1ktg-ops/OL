@@ -256,6 +256,8 @@ func _show_tooltip(unit: Unit) -> void:
 	var lines: Array[String] = ["%s · %s игрока %d" % [title, kind_name.get(unit.kind, ""), unit.owner]]
 	if unit.wounded:
 		lines.append("Ранена.")
+	if unit.range > 1:
+		lines.append("Дальность атаки: %d кл." % unit.range)
 	if unit.ability_text != "":
 		lines.append(unit.ability_text)
 	else:

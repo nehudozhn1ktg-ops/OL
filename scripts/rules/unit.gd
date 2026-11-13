@@ -11,6 +11,7 @@ var kind: String = "pawn"      # king / commander / pawn
 var move: int = 2
 var damage: int = 0            # бонус к урону (прибавляется к D4)
 var armor: int = 0             # бонус к защите (прибавляется к D4)
+var range: int = 1             # дальность атаки в клетках; 1 — только соседняя
 var can_attack: bool = true
 var water_walk: bool = false
 var abilities: Array[String] = []
@@ -39,6 +40,7 @@ static func from_data(owner_id: int, at: Vector2i, data: Dictionary) -> Unit:
 	unit.move = int(data.get("move", 2))
 	unit.damage = int(data.get("damage", 0))
 	unit.armor = int(data.get("armor", 0))
+	unit.range = int(data.get("range", 1))
 	unit.can_attack = bool(data.get("can_attack", true))
 	unit.ability_text = str(data.get("text", ""))
 	for ability in data.get("abilities", []):

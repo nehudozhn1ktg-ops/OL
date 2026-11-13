@@ -71,8 +71,13 @@ func unit_at(coord: Vector2i) -> Unit:
 
 # --- Взаимодействия: свойства объектов дают числа ---------------------------
 
-func terrain_defense_bonus(unit: Unit) -> int:
-	return int(TERRAIN_DEFENSE.get(board.terrain_at(unit.coord), 0))
+## Бонус защиты от террейна. Патч 7: лес защищает только от атаки с соседней
+## клетки — дальний выстрел в лес бонуса не получает.
+func terrain_defense_bonus(unit: Unit, distance: int = 1) -> int:
+	var terrain: int = board.terrain_at(unit.coord)
+	if terrain == Board.TERRAIN_FOREST and distance > 1:
+		return 0
+	return int(TERRAIN_DEFENSE.get(terrain, 0))
 
 
 ## Аура «командир»: союзники в радиусе 1 получают +1 к защите.
@@ -86,8 +91,13 @@ func aura_defense_bonus(unit: Unit) -> int:
 	return bonus
 
 
-func defense_bonus(unit: Unit) -> int:
-	return unit.armor + terrain_defense_bonus(unit) + aura_defense_bonus(unit)
+func defense_bonus(unit: Unit, distance: int = 1) -> int:
+	return unit.armor + terrain_defense_bonus(unit, distance) + aura_defense_bonus(unit)
+
+
+## Дальность атаки фигуры в клетках (1 — только соседняя).
+func attack_range(unit: Unit) -> int:
+	return maxi(1, unit.range)
 
 
 func attack_bonus(unit: Unit) -> int:
@@ -185,8 +195,9 @@ func can_attack(attacker: Unit, defender: Unit) -> Dictionary:
 		return {"ok": false, "reason": "эта фигура уже атаковала"}
 	if attacker.owner == defender.owner:
 		return {"ok": false, "reason": "своих не атакуют"}
-	if board.distance(attacker.coord, defender.coord) != 1:
-		return {"ok": false, "reason": "атака только по соседней клетке"}
+	var dist: int = board.distance(attacker.coord, defender.coord)
+	if dist < 1 or dist > attack_range(attacker):
+		return {"ok": false, "reason": "цель дальше дальности атаки (%d)" % attack_range(attacker)}
 	return {"ok": true, "reason": ""}
 
 
@@ -204,8 +215,9 @@ func attack(attacker: Unit, defender: Unit) -> Dictionary:
 ## Сам бросок боя, без проверки хода и без расхода атаки: общий путь для
 ## обычной атаки и для реакции укрепления (ADR-002).
 func _strike(attacker: Unit, defender: Unit) -> Dictionary:
+	var shot_distance: int = board.distance(attacker.coord, defender.coord)
 	var damage: int = dice.d4() + attack_bonus(attacker)
-	var defense: int = dice.d4() + defense_bonus(defender)
+	var defense: int = dice.d4() + defense_bonus(defender, shot_distance)
 	var result := {"hit": damage > defense, "damage": damage, "defense": defense,
 		"killed": false, "wounded": false, "coin": "", "reason": ""}
 	if not result["hit"]:
