@@ -10,7 +10,6 @@ signal action_changed(mode: String)
 
 const SQRT3 := 1.7320508075688772
 const MAP_PATH := "res://assets/maps/data/1x1x1.json"
-const FACTION_PATH := "res://data/factions/undead.json"
 
 const TERRAIN_FILL := {
 	0: Color("#7d8f4a"),  # трава
@@ -51,6 +50,10 @@ var legal_cells: Array[Vector2i] = []
 var attack_targets: Array[Unit] = []
 ## Что выбрано в панели действий: "", "move", "attack", "action".
 var action_mode: String = ""
+## Усиление атаки биомассой: {"damage": bool, "range": bool}.
+var attack_boost: Dictionary = {"damage": false, "range": false}
+## Кто за какую фракцию играет: player -> id фракции.
+var faction_ids: Dictionary = {}
 
 
 func _ready() -> void:
@@ -70,11 +73,15 @@ func _ready() -> void:
 	queue_redraw()
 
 
-## Отряд из фракционного листа: шесть фигур нежити на клетки у флагов.
+## Отряды обеих сторон из фракционных листов: по шесть фигур к своим флагам.
+## Заражённые начинают с максимумом биомассы (фракционный лист 0–6).
 func _place_demo_units() -> void:
-	var faction := FactionData.load_file(FACTION_PATH)
-	var roster := FactionData.roster(faction, 6)
-	if roster.is_empty():
+	var rosters := {}
+	for player in [1, 2]:
+		var faction := FactionData.load_file(GameConfig.path_for(player))
+		faction_ids[player] = str(faction.get("id", ""))
+		rosters[player] = FactionData.roster(faction, 6)
+	if rosters.get(1, []).is_empty() or rosters.get(2, []).is_empty():
 		push_warning("фракция не загрузилась, ставлю заглушки")
 		game.add_unit(1, Vector2i(-2, 0), false)
 		game.add_unit(2, Vector2i(2, 0), false)
@@ -89,8 +96,11 @@ func _place_demo_units() -> void:
 		return
 	game.add_flag(1, flags[0])
 	game.add_flag(2, flags[flags.size() - 1])
-	_place_team(1, flags[0], roster)
-	_place_team(2, flags[flags.size() - 1], roster)
+	_place_team(1, flags[0], rosters[1])
+	_place_team(2, flags[flags.size() - 1], rosters[2])
+	for player in faction_ids.keys():
+		if faction_ids[player] == "infected":
+			game.start_biomass(player)
 
 
 func _place_team(player: int, anchor: Vector2i, roster: Array) -> void:
@@ -256,6 +266,7 @@ func _draw_outline(coord: Vector2i, color: Color, width: float) -> void:
 func select_unit(unit: Unit) -> void:
 	selected_unit = unit
 	action_mode = ""
+	attack_boost = {"damage": false, "range": false}
 	legal_cells = []
 	attack_targets = []
 	queue_redraw()
@@ -279,7 +290,7 @@ func choose_action(mode: String) -> void:
 				status.emit(game.can_activate(selected_unit)["reason"])
 				return
 			action_mode = "attack"
-			attack_targets = game.attackable_targets(selected_unit)
+			attack_targets = game.attackable_targets(selected_unit, _extra_range())
 			legal_cells = []
 			status.emit("Атака: целей %d. Клик по противнику" % attack_targets.size())
 		_:
@@ -294,6 +305,29 @@ func _unit_name(unit: Unit) -> String:
 	return unit.name_ru if unit.name_ru != "" else "фигура"
 
 
+## Дополнительная дальность от усиления биомассой.
+func _extra_range() -> int:
+	return 1 if bool(attack_boost.get("range", false)) else 0
+
+
+## Усиление атаки биомассой — выбор игрока после нажатия «Атака»:
+## 1 биомасса = +1 урон, 2 биомассы = +1 дальность.
+func set_attack_boost(damage_up: bool, range_up: bool) -> void:
+	attack_boost = {"damage": damage_up, "range": range_up}
+	if action_mode != "attack" or selected_unit == null:
+		return
+	attack_targets = game.attackable_targets(selected_unit, _extra_range())
+	var parts: Array[String] = []
+	if damage_up:
+		parts.append("+1 урон")
+	if range_up:
+		parts.append("+1 дальность")
+	var label := "без усиления" if parts.is_empty() else ", ".join(parts)
+	status.emit("Атака %s. Целей %d, биомассы %d" % [
+		label, attack_targets.size(), game.biomass_of(game.current_player)])
+	queue_redraw()
+
+
 func _click(coord: Vector2i) -> void:
 	if not board.has_cell(coord):
 		return
@@ -304,7 +338,8 @@ func _click(coord: Vector2i) -> void:
 		return
 
 	if selected_unit != null and clicked != null and action_mode == "attack" and attack_targets.has(clicked):
-		var blow := game.attack(selected_unit, clicked)
+		var blow := game.attack_with_biomass(selected_unit, clicked,
+			bool(attack_boost.get("damage", false)), bool(attack_boost.get("range", false)))
 		if blow["reason"] != "" and blow["damage"] == 0:
 			status.emit(blow["reason"])
 			return
@@ -357,6 +392,7 @@ func _click(coord: Vector2i) -> void:
 func _clear_selection() -> void:
 	selected_unit = null
 	action_mode = ""
+	attack_boost = {"damage": false, "range": false}
 	legal_cells.clear()
 	attack_targets.clear()
 	queue_redraw()

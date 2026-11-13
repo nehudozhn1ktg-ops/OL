@@ -33,6 +33,8 @@ var _lbl_move: Label
 var _lbl_armor: Label
 var _tooltip: PanelContainer
 var _lbl_tooltip: Label
+var _boost_panel: PanelContainer
+var _lbl_biomass: Label
 ## Подсказка ходит за курсором; на снимке её ставят в заданную точку.
 var _follow_mouse: bool = true
 
@@ -41,6 +43,7 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_build_actions()
+	_build_boost()
 	_build_stats()
 	_build_tooltip()
 	_refresh(null, null)
@@ -85,6 +88,49 @@ func _build_actions() -> void:
 	_actions.visible = false
 
 
+## Панель усиления атаки биомассой — появляется после нажатия «Атака».
+func _build_boost() -> void:
+	_boost_panel = PanelContainer.new()
+	_boost_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_boost_panel.anchor_left = 1.0
+	_boost_panel.anchor_right = 1.0
+	_boost_panel.anchor_top = 0.5
+	_boost_panel.anchor_bottom = 0.5
+	_boost_panel.offset_left = -404.0
+	_boost_panel.offset_right = -110.0
+	_boost_panel.offset_top = -80.0
+	_boost_panel.offset_bottom = 80.0
+	_boost_panel.add_theme_stylebox_override("panel", _panel_style(Color(0.10, 0.07, 0.09, 0.94)))
+	add_child(_boost_panel)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 6)
+	_boost_panel.add_child(column)
+
+	var title := Label.new()
+	title.text = "Биомасса в атаку"
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", COLOR_ACCENT)
+	column.add_child(title)
+
+	var boost_damage := _boost_button(column, "−1 биомасса: атака +1")
+	boost_damage.pressed.connect(func(): grid.set_attack_boost(true, false))
+	var boost_range := _boost_button(column, "−2 биомассы: +1 дальность")
+	boost_range.pressed.connect(func(): grid.set_attack_boost(false, true))
+	var plain := _boost_button(column, "обычная атака")
+	plain.pressed.connect(func(): grid.set_attack_boost(false, false))
+	_boost_panel.visible = false
+
+
+func _boost_button(parent: VBoxContainer, text: String) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.add_theme_font_size_override("font_size", 15)
+	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	parent.add_child(button)
+	return button
+
+
 func _build_stats() -> void:
 	_stats = PanelContainer.new()
 	_stats.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -92,8 +138,8 @@ func _build_stats() -> void:
 	_stats.anchor_right = 0.5
 	_stats.anchor_top = 0.0
 	_stats.anchor_bottom = 0.0
-	_stats.offset_left = -230.0
-	_stats.offset_right = 230.0
+	_stats.offset_left = -280.0
+	_stats.offset_right = 280.0
 	_stats.offset_top = 64.0
 	_stats.offset_bottom = 122.0
 	_stats.add_theme_stylebox_override("panel", _panel_style())
@@ -115,6 +161,14 @@ func _build_stats() -> void:
 	var armor_box := _stat_box(ICON_ARMOR)
 	_lbl_armor = armor_box[1]
 	row.add_child(armor_box[0])
+
+	var sep := VSeparator.new()
+	row.add_child(sep)
+	_lbl_biomass = Label.new()
+	_lbl_biomass.add_theme_font_size_override("font_size", 18)
+	_lbl_biomass.add_theme_color_override("font_color", COLOR_ACCENT)
+	_lbl_biomass.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(_lbl_biomass)
 	_stats.visible = false
 
 
@@ -191,6 +245,7 @@ func _stat_box(texture: Texture2D) -> Array:
 func _on_selected_changed(unit: Unit) -> void:
 	selected = unit
 	_refresh(unit, hovered)
+	_boost_panel.visible = false
 	if unit == null:
 		_actions.visible = false
 		return
@@ -209,9 +264,21 @@ func _on_hovered_changed(unit: Unit) -> void:
 	_refresh(selected, unit)
 
 
-func _on_action_changed(_mode: String) -> void:
+func _on_action_changed(mode: String) -> void:
 	if selected != null:
 		_update_buttons(selected)
+	_update_boost_visibility(mode)
+
+
+func _is_infected() -> bool:
+	if grid == null:
+		return false
+	return str(grid.faction_ids.get(grid.game.current_player, "")) == "infected"
+
+
+func _update_boost_visibility(mode: String) -> void:
+	var enough := grid != null and grid.game.biomass_of(grid.game.current_player) > 0
+	_boost_panel.visible = mode == "attack" and _is_infected() and enough
 
 
 func _update_buttons(unit: Unit) -> void:
@@ -276,6 +343,11 @@ func show_tooltip_at(unit: Unit, at: Vector2) -> void:
 
 
 func _process(_delta: float) -> void:
+	if _lbl_biomass != null:
+		var infected := _is_infected()
+		_lbl_biomass.visible = infected
+		if infected:
+			_lbl_biomass.text = "Биомасса %d" % grid.game.biomass_of(grid.game.current_player)
 	if _tooltip.visible and _follow_mouse:
 		var mouse := get_global_mouse_position()
 		var view := get_viewport_rect().size

@@ -11,6 +11,14 @@ class_name Game
 const MAX_ACTIVATIONS := 2
 const FLAG_POINTS := 3
 
+## Биомасса заражённых: шкала на фракционном листе 0–6, в начале матча — максимум.
+const BIOMASS_MAX := 6
+const BIOMASS_DAMAGE_COST := 1
+const BIOMASS_RANGE_COST := 2
+## +2 биомассы за каждую свою уничтоженную фигуру, +1 за уничтоженного противника.
+const BIOMASS_PER_LOSS := 2
+const BIOMASS_PER_KILL := 1
+
 ## Бонусы защиты от террейна (легенда карт).
 const TERRAIN_DEFENSE := {
 	Board.TERRAIN_FOREST: 1,
@@ -34,6 +42,8 @@ var last_fort_reactions: Array[Dictionary] = []
 ## Флаги: coord -> владелец. Террейн «флаг» один для всех, поэтому владелец
 ## хранится отдельно от подложки карты.
 var flags: Dictionary = {}
+## Биомасса заражённых по игрокам (0–6). Начисляется за бои, тратится на усиления.
+var biomass: Dictionary = {}
 
 
 func setup(board_: Board, dice_: Dice = null) -> void:
@@ -47,6 +57,7 @@ func setup(board_: Board, dice_: Dice = null) -> void:
 	scores = {1: 0, 2: 0, 3: 0, 4: 0}
 	flags.clear()
 	last_fort_reactions.clear()
+	biomass.clear()
 	begin_turn()
 
 
@@ -184,7 +195,7 @@ func move_unit(unit: Unit, to: Vector2i) -> bool:
 
 # --- Бой --------------------------------------------------------------------
 
-func can_attack(attacker: Unit, defender: Unit) -> Dictionary:
+func can_attack(attacker: Unit, defender: Unit, extra_range: int = 0) -> Dictionary:
 	if attacker.owner != current_player:
 		return {"ok": false, "reason": "сейчас ход другого игрока"}
 	if not attacker.activated:
@@ -195,28 +206,51 @@ func can_attack(attacker: Unit, defender: Unit) -> Dictionary:
 		return {"ok": false, "reason": "эта фигура уже атаковала"}
 	if attacker.owner == defender.owner:
 		return {"ok": false, "reason": "своих не атакуют"}
+	var reach: int = attack_range(attacker) + extra_range
 	var dist: int = board.distance(attacker.coord, defender.coord)
-	if dist < 1 or dist > attack_range(attacker):
-		return {"ok": false, "reason": "цель дальше дальности атаки (%d)" % attack_range(attacker)}
+	if dist < 1 or dist > reach:
+		return {"ok": false, "reason": "цель дальше дальности атаки (%d)" % reach}
 	return {"ok": true, "reason": ""}
 
 
-## Один бросок атаки: {damage, defense, hit, killed, wounded, coin}
-func attack(attacker: Unit, defender: Unit) -> Dictionary:
-	var verdict := can_attack(attacker, defender)
+## Один бросок атаки: {damage, defense, hit, killed, wounded, coin}.
+## bonus: {"damage": +N, "range": +N} — усиления (биомасса и т.п.).
+func attack(attacker: Unit, defender: Unit, bonus: Dictionary = {}) -> Dictionary:
+	var extra_range := int(bonus.get("range", 0))
+	var verdict := can_attack(attacker, defender, extra_range)
 	if not verdict["ok"]:
 		return {"hit": false, "damage": 0, "defense": 0, "killed": false,
 			"wounded": false, "coin": "", "reason": verdict["reason"]}
 
 	attacker.attacked = true
-	return _strike(attacker, defender)
+	return _strike(attacker, defender, int(bonus.get("damage", 0)))
+
+
+## Атака с усилением биомассой: 1 биомасса = +1 урон, 2 = +1 дальность.
+func attack_with_biomass(attacker: Unit, defender: Unit,
+		damage_up: bool = false, range_up: bool = false) -> Dictionary:
+	var extra_range := 1 if range_up else 0
+	var verdict := can_attack(attacker, defender, extra_range)
+	if not verdict["ok"]:
+		return {"hit": false, "damage": 0, "defense": 0, "killed": false,
+			"wounded": false, "coin": "", "reason": verdict["reason"]}
+
+	var cost := (BIOMASS_DAMAGE_COST if damage_up else 0) + (BIOMASS_RANGE_COST if range_up else 0)
+	if biomass_of(attacker.owner) < cost:
+		return {"hit": false, "damage": 0, "defense": 0, "killed": false,
+			"wounded": false, "coin": "",
+			"reason": "не хватает биомассы: нужно %d, есть %d" % [cost, biomass_of(attacker.owner)]}
+
+	spend_biomass(attacker.owner, cost)
+	attacker.attacked = true
+	return _strike(attacker, defender, 1 if damage_up else 0)
 
 
 ## Сам бросок боя, без проверки хода и без расхода атаки: общий путь для
 ## обычной атаки и для реакции укрепления (ADR-002).
-func _strike(attacker: Unit, defender: Unit) -> Dictionary:
+func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0) -> Dictionary:
 	var shot_distance: int = board.distance(attacker.coord, defender.coord)
-	var damage: int = dice.d4() + attack_bonus(attacker)
+	var damage: int = dice.d4() + attack_bonus(attacker) + extra_damage
 	var defense: int = dice.d4() + defense_bonus(defender, shot_distance)
 	var result := {"hit": damage > defense, "damage": damage, "defense": defense,
 		"killed": false, "wounded": false, "coin": "", "reason": ""}
@@ -229,6 +263,7 @@ func _strike(attacker: Unit, defender: Unit) -> Dictionary:
 		result["reason"] = "рана повторно — фигура покидает поле"
 		_remove(defender)
 		scores[owner_id] = int(scores.get(owner_id, 0)) + 1
+		add_biomass(owner_id, BIOMASS_PER_KILL)
 		return result
 
 	var coin: String = dice.coin()
@@ -238,6 +273,7 @@ func _strike(attacker: Unit, defender: Unit) -> Dictionary:
 		result["reason"] = "чёрная сторона монеты — фигура погибает"
 		_remove(defender)
 		scores[owner_id] = int(scores.get(owner_id, 0)) + 1
+		add_biomass(owner_id, BIOMASS_PER_KILL)
 	else:
 		defender.wounded = true
 		result["wounded"] = true
@@ -248,17 +284,48 @@ func _strike(attacker: Unit, defender: Unit) -> Dictionary:
 func _remove(unit: Unit) -> void:
 	var owner_id := unit.owner
 	units.erase(unit)
+	add_biomass(owner_id, BIOMASS_PER_LOSS)
 	# Канон: потерявшая весь отряд фракция теряет и флаг. Очков за это не дают.
 	if units_of(owner_id).is_empty():
 		_remove_flag_of(owner_id)
 
 
-func attackable_targets(unit: Unit) -> Array[Unit]:
+# --- Биомасса заражённых ------------------------------------------------------
+
+## В начале матча биомасса — максимум (фракционный лист, 0–6).
+func start_biomass(player: int) -> void:
+	biomass[player] = BIOMASS_MAX
+
+
+func biomass_of(player: int) -> int:
+	return int(biomass.get(player, 0))
+
+
+func add_biomass(player: int, amount: int) -> void:
+	biomass[player] = mini(BIOMASS_MAX, biomass_of(player) + amount)
+
+
+func spend_biomass(player: int, amount: int) -> bool:
+	if amount <= 0:
+		return true
+	if biomass_of(player) < amount:
+		return false
+	biomass[player] = biomass_of(player) - amount
+	return true
+
+
+## Хватает ли биомассы на усиление атаки (+1 урон / +1 дальность).
+func can_empower_attack(player: int, damage_up: bool, range_up: bool) -> bool:
+	var cost := (BIOMASS_DAMAGE_COST if damage_up else 0) + (BIOMASS_RANGE_COST if range_up else 0)
+	return biomass_of(player) >= cost
+
+
+func attackable_targets(unit: Unit, extra_range: int = 0) -> Array[Unit]:
 	var result: Array[Unit] = []
 	if unit.owner != current_player or unit.attacked or not unit.activated:
 		return result
 	for other in units:
-		if can_attack(unit, other)["ok"]:
+		if can_attack(unit, other, extra_range)["ok"]:
 			result.append(other)
 	return result
 
