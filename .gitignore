@@ -28,3 +28,7 @@ screenshot-*.png
 
 # Сгенерированные тайлы (исходники в assets/maps)
 assets/tiles/*.png.import
+
+# Служебные файлы Godot для отладочных картинок
+assets/maps/data/debug_*.png.import
+screenshot*.png.import
