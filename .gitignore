@@ -32,3 +32,6 @@ assets/tiles/*.png.import
 # Служебные файлы Godot для отладочных картинок
 assets/maps/data/debug_*.png.import
 screenshot*.png.import
+
+# Снимки версий (архивы, не в истории)
+versions/*.zip
