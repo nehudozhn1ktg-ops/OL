@@ -1,0 +1,30 @@
+# Godot вЂ” СЃР»СѓР¶РµР±РЅС‹Рµ С„Р°Р№Р»С‹, РЅРµ РєРѕРјРјРёС‚РёРј
+.godot/
+export_presets.cfg
+*.translation
+android/
+ios/
+
+# РЎР±РѕСЂРєРё
+build/
+*.exe
+*.pck
+
+# РћРЎ
+Thumbs.db
+.DS_Store
+
+# РЎРµРєСЂРµС‚С‹ Рё Р»РѕРєР°Р»СЊРЅРѕРµ
+.env
+*.key
+.secrets/
+
+# Артефакты запуска
+screenshot*.png
+
+# Отладочные картинки распознавания
+assets/maps/data/debug_*.png
+screenshot-*.png
+
+# Сгенерированные тайлы (исходники в assets/maps)
+assets/tiles/*.png.import
