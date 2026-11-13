@@ -27,12 +27,19 @@ C:\Godot\Godot_v4.7.2-stable_win64.exe --headless --path . --script res://tests/
 C:\Godot\Godot_v4.7.2-stable_win64.exe --headless --path . --script res://tests/faction_data.gd
 C:\Godot\Godot_v4.7.2-stable_win64.exe --headless --path . --script res://tests/factions_all.gd
 C:\Godot\Godot_v4.7.2-stable_win64.exe --headless --path . --script res://tests/verify_hex.gd
+C:\Godot\Godot_v4.7.2-stable_win64.exe --headless --path . --script res://tests/flag.gd
+C:\Godot\Godot_v4.7.2-stable_win64.exe --headless --path . --script res://tests/fort_reaction.gd
 
 # снимок окна для отчёта
 C:\Godot\Godot_v4.7.2-stable_win64.exe --path . -- --shot
 ```
 
-Git: `C:\Git\cmd\git.exe` (в PATH). Логичные сообщения коммитов — по-русски.
+Вывод Godot в PowerShell забирать через `Start-Process -Wait -PassThru
+-RedirectStandardOutput $log`: при `$out = & $godot ...` вывод пропадает и теряется
+код возврата.
+
+Git: `C:\Git\cmd\git.exe` (полным путём — в PATH его нет). Remote —
+`nehudozhn1ktg-ops/OL`, ветка `main`, пуш работает. Коммиты — по-русски.
 
 ## Границы
 

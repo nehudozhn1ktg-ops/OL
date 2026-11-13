@@ -294,19 +294,36 @@ func _click(coord: Vector2i) -> void:
 			var mover := selected_unit
 			game.move_unit(mover, coord)
 			queue_redraw()
+			var note := _reaction_note()
+			if not game.units.has(mover):
+				selected_unit = null
+				legal_cells.clear()
+				status.emit("Фигура погибла от реакции укрепления.%s" % note)
+				return
 			if mover.activated and not mover.attacked:
 				legal_cells = []
-				status.emit("Фигура перешла. Можно атаковать соседнюю цель или нажать пробел")
+				status.emit("Фигура перешла. Можно атаковать соседнюю цель или нажать пробел%s" % note)
 			else:
 				selected_unit = null
 				legal_cells.clear()
-				status.emit("Фигура перешла. Нажмите пробел, чтобы передать ход")
+				status.emit("Фигура перешла. Нажмите пробел, чтобы передать ход%s" % note)
 		else:
 			status.emit(verdict["reason"])
 			queue_redraw()
 		return
 
 	status.emit("Клетка (%d, %d) · %s" % [coord.x, coord.y, _terrain_name(board.terrain_at(coord))])
+
+
+## Подпись о реакции укрепления после перехода (ADR-002).
+func _reaction_note() -> String:
+	if game.last_fort_reactions.is_empty():
+		return ""
+	var parts: Array[String] = []
+	for blow in game.last_fort_reactions:
+		parts.append("урон %d против защиты %d (%s)" % [
+			blow["damage"], blow["defense"], blow["reason"]])
+	return " Реакция укрепления: " + "; ".join(parts) + "."
 
 
 func _terrain_name(terrain: int) -> String:

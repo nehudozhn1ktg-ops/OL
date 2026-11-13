@@ -28,6 +28,9 @@ var scores: Dictionary = {1: 0, 2: 0, 3: 0, 4: 0}
 
 var points_collected_last: int = 0
 
+## Реакции укрепления после последнего движения (ADR-002): список ударов.
+var last_fort_reactions: Array[Dictionary] = []
+
 ## Флаги: coord -> владелец. Террейн «флаг» один для всех, поэтому владелец
 ## хранится отдельно от подложки карты.
 var flags: Dictionary = {}
@@ -43,6 +46,7 @@ func setup(board_: Board, dice_: Dice = null) -> void:
 	is_day = true
 	scores = {1: 0, 2: 0, 3: 0, 4: 0}
 	flags.clear()
+	last_fort_reactions.clear()
 	begin_turn()
 
 
@@ -164,6 +168,7 @@ func move_unit(unit: Unit, to: Vector2i) -> bool:
 		return false
 	unit.coord = to
 	unit.moved = true
+	_resolve_fort_reactions(unit)
 	return true
 
 
@@ -193,6 +198,12 @@ func attack(attacker: Unit, defender: Unit) -> Dictionary:
 			"wounded": false, "coin": "", "reason": verdict["reason"]}
 
 	attacker.attacked = true
+	return _strike(attacker, defender)
+
+
+## Сам бросок боя, без проверки хода и без расхода атаки: общий путь для
+## обычной атаки и для реакции укрепления (ADR-002).
+func _strike(attacker: Unit, defender: Unit) -> Dictionary:
 	var damage: int = dice.d4() + attack_bonus(attacker)
 	var defense: int = dice.d4() + defense_bonus(defender)
 	var result := {"hit": damage > defense, "damage": damage, "defense": defense,
@@ -238,6 +249,40 @@ func attackable_targets(unit: Unit) -> Array[Unit]:
 		if can_attack(unit, other)["ok"]:
 			result.append(other)
 	return result
+
+
+# --- Реакция укрепления (ADR-002) -------------------------------------------
+
+## Кто обязан ответить на остановку moved на соседней клетке: противники,
+## стоящие на клетке укрепления и умеющие атаковать.
+func fort_reactors_to(moved: Unit) -> Array[Unit]:
+	var result: Array[Unit] = []
+	if moved == null or not units.has(moved):
+		return result
+	for unit in units:
+		if unit.owner == moved.owner or not unit.can_attack:
+			continue
+		if board.terrain_at(unit.coord) != Board.TERRAIN_FORT:
+			continue
+		if board.distance(unit.coord, moved.coord) != 1:
+			continue
+		result.append(unit)
+	return result
+
+
+## Отработать реакции после остановки: каждое укрепление бьёт один раз,
+## бесплатно — без расхода активации и атаки, в чужой ход тоже. Цель могла
+## погибнуть от предыдущей реакции: тогда следующие уже не бьют.
+func _resolve_fort_reactions(moved: Unit) -> Array[Dictionary]:
+	last_fort_reactions.clear()
+	for reactor in fort_reactors_to(moved):
+		if not units.has(moved):
+			break
+		var blow := _strike(reactor, moved)
+		blow["attacker"] = reactor
+		blow["defender"] = moved
+		last_fort_reactions.append(blow)
+	return last_fort_reactions
 
 
 # --- Флаг фракции ------------------------------------------------------------
