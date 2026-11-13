@@ -79,6 +79,8 @@ func _place_demo_units() -> void:
 	flags.sort_custom(func(a, b): return a.x < b.x)
 	if flags.is_empty():
 		return
+	game.add_flag(1, flags[0])
+	game.add_flag(2, flags[flags.size() - 1])
 	_place_team(1, flags[0], roster)
 	_place_team(2, flags[flags.size() - 1], roster)
 
@@ -272,6 +274,18 @@ func _click(coord: Vector2i) -> void:
 		legal_cells.clear()
 		queue_redraw()
 		status.emit(text)
+		return
+
+	if selected_unit != null and game.has_flag(coord) and game.flag_owner(coord) != game.current_player:
+		var flag_verdict := game.can_attack_flag(selected_unit, coord)
+		if not flag_verdict["ok"]:
+			status.emit(flag_verdict["reason"])
+			return
+		var blow_flag := game.attack_flag(selected_unit, coord)
+		selected_unit = null
+		legal_cells.clear()
+		queue_redraw()
+		status.emit(blow_flag["reason"])
 		return
 
 	if selected_unit != null:

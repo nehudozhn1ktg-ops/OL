@@ -6,7 +6,7 @@ extends Node2D
 
 func _ready() -> void:
 	grid.status.connect(_on_status)
-	hint.text = "Фигура — активировать и выбрать. Клетка — идти. Враг рядом — атаковать. Пробел — передать ход."
+	hint.text = "Фигура — активировать и выбрать. Клетка — идти. Враг рядом — атаковать. Флаг рядом — уничтожить. Пробел — передать ход."
 	if "--shot" in OS.get_cmdline_user_args():
 		_take_screenshot()
 

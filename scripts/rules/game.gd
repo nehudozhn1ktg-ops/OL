@@ -9,6 +9,7 @@ class_name Game
 ## Раненая фигура при следующем проигрыше погибает без монеты.
 
 const MAX_ACTIVATIONS := 2
+const FLAG_POINTS := 3
 
 ## Бонусы защиты от террейна (легенда карт).
 const TERRAIN_DEFENSE := {
@@ -27,6 +28,10 @@ var scores: Dictionary = {1: 0, 2: 0, 3: 0, 4: 0}
 
 var points_collected_last: int = 0
 
+## Флаги: coord -> владелец. Террейн «флаг» один для всех, поэтому владелец
+## хранится отдельно от подложки карты.
+var flags: Dictionary = {}
+
 
 func setup(board_: Board, dice_: Dice = null) -> void:
 	board = board_
@@ -37,6 +42,7 @@ func setup(board_: Board, dice_: Dice = null) -> void:
 	round_number = 1
 	is_day = true
 	scores = {1: 0, 2: 0, 3: 0, 4: 0}
+	flags.clear()
 	begin_turn()
 
 
@@ -217,7 +223,11 @@ func attack(attacker: Unit, defender: Unit) -> Dictionary:
 
 
 func _remove(unit: Unit) -> void:
+	var owner_id := unit.owner
 	units.erase(unit)
+	# Канон: потерявшая весь отряд фракция теряет и флаг. Очков за это не дают.
+	if units_of(owner_id).is_empty():
+		_remove_flag_of(owner_id)
 
 
 func attackable_targets(unit: Unit) -> Array[Unit]:
@@ -228,6 +238,85 @@ func attackable_targets(unit: Unit) -> Array[Unit]:
 		if can_attack(unit, other)["ok"]:
 			result.append(other)
 	return result
+
+
+# --- Флаг фракции ------------------------------------------------------------
+
+## Поставить флаг игрока на клетку (обычно — на клетку «флаг» из карты).
+func add_flag(owner: int, coord: Vector2i) -> void:
+	board.set_terrain(coord, Board.TERRAIN_FLAG)
+	flags[coord] = owner
+
+
+func has_flag(coord: Vector2i) -> bool:
+	return flags.has(coord)
+
+
+func flag_owner(coord: Vector2i) -> int:
+	return int(flags.get(coord, 0))
+
+
+func flag_of(owner: int) -> Vector2i:
+	for coord in flags.keys():
+		if int(flags[coord]) == owner:
+			return coord
+	return Vector2i.ZERO
+
+
+## Канон: флаг — препятствие с особым условием уничтожения, атакуется как
+## обычная цель с соседней клетки, но только активированной фигурой.
+func can_attack_flag(attacker: Unit, coord: Vector2i) -> Dictionary:
+	if not flags.has(coord):
+		return {"ok": false, "reason": "здесь нет флага"}
+	if attacker.owner != current_player:
+		return {"ok": false, "reason": "сейчас ход другого игрока"}
+	if not attacker.activated:
+		return {"ok": false, "reason": "фигура не активирована: она может только двигаться"}
+	if not attacker.can_attack:
+		return {"ok": false, "reason": "эта фигура не может атаковать"}
+	if attacker.attacked:
+		return {"ok": false, "reason": "эта фигура уже атаковала"}
+	if flag_owner(coord) == attacker.owner:
+		return {"ok": false, "reason": "свой флаг не атакуют"}
+	if board.distance(attacker.coord, coord) != 1:
+		return {"ok": false, "reason": "атака только по соседней клетке"}
+	return {"ok": true, "reason": ""}
+
+
+## Бросок по флагу: нужна 4, Королю — 3–4. Бонусы урона и способности
+## не участвуют: канон прямо говорит, что они не влияют на условие.
+## Возвращает {destroyed, roll, reason}.
+func attack_flag(attacker: Unit, coord: Vector2i) -> Dictionary:
+	var verdict := can_attack_flag(attacker, coord)
+	if not verdict["ok"]:
+		return {"destroyed": false, "roll": 0, "reason": verdict["reason"]}
+
+	attacker.attacked = true
+	var roll: int = dice.d4()
+	var need: int = 3 if attacker.is_king() else 4
+	if roll < need:
+		return {"destroyed": false, "roll": roll,
+			"reason": "бросок %d — флаг устоял (нужно %d)" % [roll, need]}
+
+	_remove_flag(coord)
+	var owner_id := attacker.owner
+	scores[owner_id] = int(scores.get(owner_id, 0)) + FLAG_POINTS
+	return {"destroyed": true, "roll": roll,
+		"reason": "бросок %d — флаг уничтожен (+%d очка)" % [roll, FLAG_POINTS]}
+
+
+## Убранный флаг освобождает клетку: ASSUMPTION, канон об этом молчит,
+## вопрос владельцу записан в docs/memory/errors.md.
+func _remove_flag(coord: Vector2i) -> void:
+	flags.erase(coord)
+	board.set_terrain(coord, Board.TERRAIN_GRASS)
+
+
+func _remove_flag_of(owner_id: int) -> void:
+	for coord in flags.keys():
+		if int(flags[coord]) == owner_id:
+			_remove_flag(coord)
+			return
 
 
 # --- Очки и ход -------------------------------------------------------------

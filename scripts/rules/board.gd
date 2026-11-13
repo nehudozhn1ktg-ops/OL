@@ -80,6 +80,8 @@ func is_water(coord: Vector2i) -> bool:
 func is_passable(coord: Vector2i, traits: Dictionary = {}) -> bool:
 	if not cells.has(coord):
 		return false
+	if cells[coord] == TERRAIN_FLAG:
+		return false  # канон: флаг — физическое препятствие, сквозь него нельзя
 	if cells[coord] == TERRAIN_WATER:
 		return bool(traits.get("water_walk", false))
 	return true
