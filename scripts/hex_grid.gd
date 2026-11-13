@@ -4,6 +4,9 @@ class_name HexGrid
 ## Поле, фигуры и ввод. Правила не здесь: что можно — решают Board и Game.
 
 signal status(text: String)
+signal unit_selected_changed(unit: Unit)
+signal unit_hovered_changed(unit: Unit)
+signal action_changed(mode: String)
 
 const SQRT3 := 1.7320508075688772
 const MAP_PATH := "res://assets/maps/data/1x1x1.json"
@@ -33,6 +36,7 @@ const COLOR_BORDER := Color(0.0, 0.0, 0.0, 0.45)
 const COLOR_HOVER := Color("#f0f0f0")
 const COLOR_SELECTED := Color("#ffd447")
 const COLOR_MOVE_HINT := Color("#ffffff")
+const COLOR_ATTACK := Color("#ff6b5a")
 
 @export var hex_size: float = 42.0
 @export var map_radius: int = 3
@@ -42,7 +46,11 @@ var game: Game
 var hovered: Vector2i = Vector2i.ZERO
 var has_hover: bool = false
 var selected_unit: Unit = null
+var hovered_unit: Unit = null
 var legal_cells: Array[Vector2i] = []
+var attack_targets: Array[Unit] = []
+## Что выбрано в панели действий: "", "move", "attack", "action".
+var action_mode: String = ""
 
 
 func _ready() -> void:
@@ -204,6 +212,9 @@ func _draw() -> void:
 		_draw_outline(selected_unit.coord, COLOR_SELECTED, 3.0)
 	if has_hover and board.has_cell(hovered):
 		_draw_outline(hovered, COLOR_HOVER, 2.0)
+	for target in attack_targets:
+		if board.has_cell(target.coord):
+			_draw_outline(target.coord, COLOR_ATTACK, 3.0)
 
 	for unit in game.units:
 		_draw_unit(unit)
@@ -241,17 +252,46 @@ func _draw_outline(coord: Vector2i, color: Color, width: float) -> void:
 	draw_polyline(outline, color, width, true)
 
 
+## Выбрать фигуру: подсветки нет, пока игрок не выберет действие справа.
 func select_unit(unit: Unit) -> void:
 	selected_unit = unit
-	legal_cells = game.reachable(unit)
-	var note := "уже активирована"
-	if not unit.activated:
-		if game.activate(unit):
-			note = "активирована"
-		else:
-			note = game.can_activate(unit)["reason"]
+	action_mode = ""
+	legal_cells = []
+	attack_targets = []
 	queue_redraw()
-	status.emit("Фигура игрока %d: %s. Клеток для хода: %d" % [unit.owner, note, legal_cells.size()])
+	unit_selected_changed.emit(unit)
+	unit_hovered_changed.emit(unit)
+	status.emit("«%s» игрока %d — выберите действие справа" % [_unit_name(unit), unit.owner])
+
+
+## Действие из панели: передвижение / атака / особое действие.
+func choose_action(mode: String) -> void:
+	if selected_unit == null:
+		return
+	match mode:
+		"move":
+			action_mode = "move"
+			legal_cells = game.reachable(selected_unit)
+			attack_targets = []
+			status.emit("Передвижение: клеток %d. Клик по клетке" % legal_cells.size())
+		"attack":
+			if not selected_unit.activated and not game.activate(selected_unit):
+				status.emit(game.can_activate(selected_unit)["reason"])
+				return
+			action_mode = "attack"
+			attack_targets = game.attackable_targets(selected_unit)
+			legal_cells = []
+			status.emit("Атака: целей %d. Клик по противнику" % attack_targets.size())
+		_:
+			action_mode = ""
+			legal_cells = []
+			attack_targets = []
+	action_changed.emit(action_mode)
+	queue_redraw()
+
+
+func _unit_name(unit: Unit) -> String:
+	return unit.name_ru if unit.name_ru != "" else "фигура"
 
 
 func _click(coord: Vector2i) -> void:
@@ -263,16 +303,14 @@ func _click(coord: Vector2i) -> void:
 		select_unit(clicked)
 		return
 
-	if selected_unit != null and clicked != null and clicked.owner != game.current_player:
+	if selected_unit != null and clicked != null and action_mode == "attack" and attack_targets.has(clicked):
 		var blow := game.attack(selected_unit, clicked)
 		if blow["reason"] != "" and blow["damage"] == 0:
 			status.emit(blow["reason"])
 			return
 		var text := "Атака: урон %d против защиты %d. %s" % [
 			blow["damage"], blow["defense"], blow["reason"]]
-		selected_unit = null
-		legal_cells.clear()
-		queue_redraw()
+		_clear_selection()
 		status.emit(text)
 		return
 
@@ -282,37 +320,47 @@ func _click(coord: Vector2i) -> void:
 			status.emit(flag_verdict["reason"])
 			return
 		var blow_flag := game.attack_flag(selected_unit, coord)
-		selected_unit = null
-		legal_cells.clear()
-		queue_redraw()
+		_clear_selection()
 		status.emit(blow_flag["reason"])
 		return
 
-	if selected_unit != null:
+	if selected_unit != null and action_mode == "move":
 		var verdict := game.can_move(selected_unit, coord)
-		if verdict["ok"]:
-			var mover := selected_unit
-			game.move_unit(mover, coord)
-			queue_redraw()
-			var note := _reaction_note()
-			if not game.units.has(mover):
-				selected_unit = null
-				legal_cells.clear()
-				status.emit("Фигура погибла от реакции укрепления.%s" % note)
-				return
-			if mover.activated and not mover.attacked:
-				legal_cells = []
-				status.emit("Фигура перешла. Можно атаковать соседнюю цель или нажать пробел%s" % note)
-			else:
-				selected_unit = null
-				legal_cells.clear()
-				status.emit("Фигура перешла. Нажмите пробел, чтобы передать ход%s" % note)
-		else:
+		if not verdict["ok"]:
 			status.emit(verdict["reason"])
-			queue_redraw()
+			return
+		var mover := selected_unit
+		game.move_unit(mover, coord)
+		action_mode = ""
+		legal_cells.clear()
+		attack_targets.clear()
+		queue_redraw()
+		var note := _reaction_note()
+		if not game.units.has(mover):
+			_clear_selection()
+			status.emit("Фигура погибла от реакции укрепления.%s" % note)
+			return
+		if mover.activated and not mover.attacked:
+			status.emit("Фигура перешла. Можно атаковать соседнюю цель или нажать пробел%s" % note)
+		else:
+			_clear_selection()
+			status.emit("Фигура перешла. Нажмите пробел, чтобы передать ход%s" % note)
+		return
+
+	if selected_unit != null and clicked != null:
+		status.emit("Выберите действие справа: «атака», чтобы ударить по цели")
 		return
 
 	status.emit("Клетка (%d, %d) · %s" % [coord.x, coord.y, _terrain_name(board.terrain_at(coord))])
+
+
+func _clear_selection() -> void:
+	selected_unit = null
+	action_mode = ""
+	legal_cells.clear()
+	attack_targets.clear()
+	queue_redraw()
+	unit_selected_changed.emit(null)
 
 
 ## Подпись о реакции укрепления после перехода (ADR-002).
@@ -357,17 +405,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif has_hover:
 			has_hover = false
 			queue_redraw()
+		var under_cursor: Unit = game.unit_at(coord) if board.has_cell(coord) else null
+		if under_cursor != hovered_unit:
+			hovered_unit = under_cursor
+			unit_hovered_changed.emit(under_cursor)
 	elif event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			_click(pixel_to_hex(get_local_mouse_position()))
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
-			selected_unit = null
-			legal_cells.clear()
-			queue_redraw()
+			_clear_selection()
 			status.emit("Выбор снят")
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_SPACE:
 		game.end_turn()
-		selected_unit = null
-		legal_cells.clear()
-		queue_redraw()
+		_clear_selection()
 		status.emit("Ход передан игроку %d (раунд %d)" % [game.current_player, game.round_number])

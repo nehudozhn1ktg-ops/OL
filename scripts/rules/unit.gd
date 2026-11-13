@@ -14,6 +14,8 @@ var armor: int = 0             # бонус к защите (прибавляе�
 var can_attack: bool = true
 var water_walk: bool = false
 var abilities: Array[String] = []
+## Текст способности с карты персонажа — для подсказки в интерфейсе.
+var ability_text: String = ""
 
 var wounded: bool = false
 
@@ -38,6 +40,7 @@ static func from_data(owner_id: int, at: Vector2i, data: Dictionary) -> Unit:
 	unit.damage = int(data.get("damage", 0))
 	unit.armor = int(data.get("armor", 0))
 	unit.can_attack = bool(data.get("can_attack", true))
+	unit.ability_text = str(data.get("text", ""))
 	for ability in data.get("abilities", []):
 		unit.abilities.append(str(ability))
 	return unit

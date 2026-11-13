@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/hex_grid.gd" id="2_grid"]
+[ext_resource type="Script" path="res://scripts/hud.gd" id="3_hud"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_main")
@@ -20,3 +21,13 @@ offset_bottom = 60.0
 theme_override_colors/font_color = Color(0.92, 0.92, 0.92, 1)
 theme_override_font_sizes/font_size = 20
 text = "Наведите курсор на клетку"
+
+[node name="Hud" type="Control" parent="UI"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("3_hud")
