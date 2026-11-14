@@ -52,6 +52,8 @@ var attack_targets: Array[Unit] = []
 var action_mode: String = ""
 ## Усиление атаки биомассой: {"damage": bool, "range": bool}.
 var attack_boost: Dictionary = {"damage": false, "range": false}
+## Усиление передвижения биомассой: 0..2 клетки.
+var move_boost: int = 0
 ## Кто за какую фракцию играет: player -> id фракции.
 var faction_ids: Dictionary = {}
 
@@ -267,6 +269,7 @@ func select_unit(unit: Unit) -> void:
 	selected_unit = unit
 	action_mode = ""
 	attack_boost = {"damage": false, "range": false}
+	move_boost = 0
 	legal_cells = []
 	attack_targets = []
 	queue_redraw()
@@ -282,6 +285,7 @@ func choose_action(mode: String) -> void:
 	match mode:
 		"move":
 			action_mode = "move"
+			move_boost = 0
 			legal_cells = game.reachable(selected_unit)
 			attack_targets = []
 			status.emit("Передвижение: клеток %d. Клик по клетке" % legal_cells.size())
@@ -328,6 +332,27 @@ func set_attack_boost(damage_up: bool, range_up: bool) -> void:
 	queue_redraw()
 
 
+## Усиление передвижения биомассой: 1 биомасса = +1 клетка (на 1 или 2).
+func set_move_boost(extra: int) -> void:
+	move_boost = clampi(extra, 0, 2)
+	if action_mode != "move" or selected_unit == null:
+		return
+	legal_cells = game.reachable(selected_unit, move_boost)
+	var label := "без усиления" if move_boost == 0 else "+%d клетка" % move_boost
+	status.emit("Передвижение %s: клеток %d, биомассы %d" % [
+		label, legal_cells.size(), game.biomass_of(game.current_player)])
+	queue_redraw()
+
+
+## Усиление брони выбранной фигуры биомассой (1 = +1 к следующей защите).
+func boost_selected_armor() -> void:
+	if selected_unit == null:
+		return
+	var verdict := game.boost_armor(selected_unit)
+	status.emit(verdict["reason"])
+	queue_redraw()
+
+
 func _click(coord: Vector2i) -> void:
 	if not board.has_cell(coord):
 		return
@@ -360,13 +385,13 @@ func _click(coord: Vector2i) -> void:
 		return
 
 	if selected_unit != null and action_mode == "move":
-		var verdict := game.can_move(selected_unit, coord)
+		var mover := selected_unit
+		var verdict := game.move_with_biomass(mover, coord, move_boost)
 		if not verdict["ok"]:
 			status.emit(verdict["reason"])
 			return
-		var mover := selected_unit
-		game.move_unit(mover, coord)
 		action_mode = ""
+		move_boost = 0
 		legal_cells.clear()
 		attack_targets.clear()
 		queue_redraw()
@@ -393,6 +418,7 @@ func _clear_selection() -> void:
 	selected_unit = null
 	action_mode = ""
 	attack_boost = {"damage": false, "range": false}
+	move_boost = 0
 	legal_cells.clear()
 	attack_targets.clear()
 	queue_redraw()

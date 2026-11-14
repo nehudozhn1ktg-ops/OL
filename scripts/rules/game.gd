@@ -15,6 +15,8 @@ const FLAG_POINTS := 3
 const BIOMASS_MAX := 6
 const BIOMASS_DAMAGE_COST := 1
 const BIOMASS_RANGE_COST := 2
+const BIOMASS_MOVE_COST := 1
+const BIOMASS_ARMOR_COST := 1
 ## +2 биомассы за каждую свою уничтоженную фигуру, +1 за уничтоженного противника.
 const BIOMASS_PER_LOSS := 2
 const BIOMASS_PER_KILL := 1
@@ -144,32 +146,34 @@ func activate(unit: Unit) -> bool:
 
 # --- Передвижение -----------------------------------------------------------
 
-func can_move(unit: Unit, to: Vector2i) -> Dictionary:
+func can_move(unit: Unit, to: Vector2i, extra_move: int = 0) -> Dictionary:
 	if unit.owner != current_player:
 		return {"ok": false, "reason": "сейчас ход другого игрока"}
 	if unit.moved:
 		return {"ok": false, "reason": "эта фигура уже двигалась"}
 	if not board.has_cell(to):
 		return {"ok": false, "reason": "за пределами поля"}
-	if board.distance(unit.coord, to) > unit.move:
-		return {"ok": false, "reason": "дальше, чем позволяет передвижение (%d)" % unit.move}
-	if not reachable(unit).has(to):
+	var step: int = unit.move + extra_move
+	if board.distance(unit.coord, to) > step:
+		return {"ok": false, "reason": "дальше, чем позволяет передвижение (%d)" % step}
+	if not reachable(unit, extra_move).has(to):
 		return {"ok": false, "reason": "нет пути: мешают фигуры, вода или край поля"}
 	return {"ok": true, "reason": ""}
 
 
 ## Клетки, куда фигура может дойти за свой ход (BFS по проходимости и занятости).
-func reachable(unit: Unit) -> Array[Vector2i]:
+func reachable(unit: Unit, extra_move: int = 0) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
 	if unit.owner != current_player or unit.moved:
 		return result
+	var step: int = unit.move + extra_move
 	var seen := {unit.coord: 0}
 	var queue: Array = [[unit.coord, 0]]
 	while not queue.is_empty():
 		var entry: Array = queue.pop_front()
 		var current: Vector2i = entry[0]
 		var dist: int = entry[1]
-		if dist >= unit.move:
+		if dist >= step:
 			continue
 		for next in board.neighbors(current):
 			if seen.has(next):
@@ -184,13 +188,28 @@ func reachable(unit: Unit) -> Array[Vector2i]:
 	return result
 
 
-func move_unit(unit: Unit, to: Vector2i) -> bool:
-	if not can_move(unit, to)["ok"]:
+func move_unit(unit: Unit, to: Vector2i, extra_move: int = 0) -> bool:
+	if not can_move(unit, to, extra_move)["ok"]:
 		return false
 	unit.coord = to
 	unit.moved = true
 	_resolve_fort_reactions(unit)
 	return true
+
+
+## Движение с усилением биомассой: 1 биомасса = +1 клетка (на 1 или 2).
+func move_with_biomass(unit: Unit, to: Vector2i, extra_move: int) -> Dictionary:
+	var extra: int = clampi(extra_move, 0, 2)
+	var verdict := can_move(unit, to, extra)
+	if not verdict["ok"]:
+		return verdict
+	var cost := BIOMASS_MOVE_COST * extra
+	if biomass_of(unit.owner) < cost:
+		return {"ok": false,
+			"reason": "не хватает биомассы: нужно %d, есть %d" % [cost, biomass_of(unit.owner)]}
+	spend_biomass(unit.owner, cost)
+	move_unit(unit, to, extra)
+	return {"ok": true, "reason": "передвижение +%d за %d биомассы" % [extra, cost]}
 
 
 # --- Бой --------------------------------------------------------------------
@@ -251,7 +270,8 @@ func attack_with_biomass(attacker: Unit, defender: Unit,
 func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0) -> Dictionary:
 	var shot_distance: int = board.distance(attacker.coord, defender.coord)
 	var damage: int = dice.d4() + attack_bonus(attacker) + extra_damage
-	var defense: int = dice.d4() + defense_bonus(defender, shot_distance)
+	var defense: int = dice.d4() + defense_bonus(defender, shot_distance) + defender.armor_boost
+	defender.armor_boost = 0  # усиление брони — на одну защиту
 	var result := {"hit": damage > defense, "damage": damage, "defense": defense,
 		"killed": false, "wounded": false, "coin": "", "reason": ""}
 	if not result["hit"]:
@@ -318,6 +338,16 @@ func spend_biomass(player: int, amount: int) -> bool:
 func can_empower_attack(player: int, damage_up: bool, range_up: bool) -> bool:
 	var cost := (BIOMASS_DAMAGE_COST if damage_up else 0) + (BIOMASS_RANGE_COST if range_up else 0)
 	return biomass_of(player) >= cost
+
+
+## Усиление брони биомассой: 1 биомасса = +1 к следующей защите этой фигуры.
+func boost_armor(unit: Unit) -> Dictionary:
+	if biomass_of(unit.owner) < BIOMASS_ARMOR_COST:
+		return {"ok": false,
+			"reason": "не хватает биомассы: нужно %d, есть %d" % [BIOMASS_ARMOR_COST, biomass_of(unit.owner)]}
+	spend_biomass(unit.owner, BIOMASS_ARMOR_COST)
+	unit.armor_boost += 1
+	return {"ok": true, "reason": "броня +1 к следующей защите (биомассы %d)" % biomass_of(unit.owner)}
 
 
 func attackable_targets(unit: Unit, extra_range: int = 0) -> Array[Unit]:

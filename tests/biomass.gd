@@ -19,6 +19,8 @@ func _init() -> void:
 	_test_damage_boost()
 	_test_range_boost()
 	_test_not_enough()
+	_test_move_boost()
+	_test_armor_boost()
 
 	print("")
 	print("РЕЗУЛЬТАТ: %d проверок, провалов %d" % [checks, failures])
@@ -144,3 +146,47 @@ func _test_not_enough() -> void:
 	var miss := far.attack_with_biomass(shooter, distant, true, true)
 	_check("слишком далеко — отказ", miss["damage"] == 0)
 	_check("биомасса не списана", far.biomass_of(1) == 6, "= %d" % far.biomass_of(1))
+
+
+func _test_move_boost() -> void:
+	print("1 биомасса = +1 клетка передвижения")
+	var game := _make_game()
+	game.start_biomass(1)
+	var unit := game.add_unit(1, START).configure("pawn", 2, 0, 0)
+	var target := Vector2i(3, 0)
+	_check("без усиления далеко", game.can_move(unit, target)["ok"] == false)
+	_check("с усилением можно", game.can_move(unit, target, 1)["ok"])
+	var verdict := game.move_with_biomass(unit, target, 1)
+	_check("переход выполнен", verdict["ok"], str(verdict))
+	_check("фигура на месте", unit.coord == target)
+	_check("списана 1 биомасса", game.biomass_of(1) == 5, "= %d" % game.biomass_of(1))
+
+	var poor := _make_game()
+	var walker := poor.add_unit(1, START).configure("pawn", 2, 0, 0)
+	var denied := poor.move_with_biomass(walker, Vector2i(3, 0), 1)
+	_check("без биомассы отказ", denied["ok"] == false)
+	_check("причина названа", str(denied["reason"]).contains("биомассы"))
+	_check("фигура не двинулась", walker.coord == START)
+
+
+func _test_armor_boost() -> void:
+	print("1 биомасса = +1 броня к следующей защите")
+	var game := _make_game()
+	game.start_biomass(2)  # биомасса у защищающегося (владельца фигуры)
+	var attacker := game.add_unit(1, START).configure("pawn", 2, 0, 0)
+	game.activate(attacker)
+	var defender := game.add_unit(2, Vector2i(1, 0)).configure("pawn", 2, 0, 2)
+	var boost := game.boost_armor(defender)
+	_check("усиление выдано", boost["ok"], str(boost))
+	_check("броня +1 на фигуре", defender.armor_boost == 1)
+	_check("списана 1 биомасса", game.biomass_of(2) == 5, "= %d" % game.biomass_of(2))
+
+	game.dice.force([2, 2])
+	var blow := game.attack(attacker, defender)
+	_check("в защите 2 + броня 2 + усиление 1 = 5", blow["defense"] == 5, "= %d" % blow["defense"])
+	_check("усиление израсходовано", defender.armor_boost == 0)
+
+	var empty := _make_game()
+	var bare := empty.add_unit(2, Vector2i(1, 0)).configure("pawn", 2, 0, 2)
+	_check("без биомассы отказ", empty.boost_armor(bare)["ok"] == false)
+	_check("броня не выросла", bare.armor_boost == 0)

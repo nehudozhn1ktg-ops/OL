@@ -19,6 +19,8 @@ var abilities: Array[String] = []
 var ability_text: String = ""
 
 var wounded: bool = false
+## Разовое усиление брони (биомасса): прибавляется к следующей защите и сбрасывается.
+var armor_boost: int = 0
 
 # Состояние в рамках текущего хода игрока
 var activated: bool = false

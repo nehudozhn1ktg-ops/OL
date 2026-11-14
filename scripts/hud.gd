@@ -27,6 +27,8 @@ var _actions: PanelContainer
 var _btn_move: TextureButton
 var _btn_attack: TextureButton
 var _btn_action: TextureButton
+var _btn_armor: TextureButton
+var _move_panel: PanelContainer
 var _stats: PanelContainer
 var _lbl_damage: Label
 var _lbl_move: Label
@@ -44,6 +46,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_build_actions()
 	_build_boost()
+	_build_move_boost()
 	_build_stats()
 	_build_tooltip()
 	_refresh(null, null)
@@ -82,9 +85,12 @@ func _build_actions() -> void:
 	_btn_attack.pressed.connect(func(): _choose("attack"))
 	_btn_action = _make_button(ICON_ACTION, "Действие")
 	_btn_action.pressed.connect(func(): _choose("action"))
+	_btn_armor = _make_button(ICON_ARMOR, "Броня +1 (биомасса)")
+	_btn_armor.pressed.connect(func(): grid.boost_selected_armor())
 	column.add_child(_btn_move)
 	column.add_child(_btn_attack)
 	column.add_child(_btn_action)
+	column.add_child(_btn_armor)
 	_actions.visible = false
 
 
@@ -129,6 +135,40 @@ func _boost_button(parent: VBoxContainer, text: String) -> Button:
 	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	parent.add_child(button)
 	return button
+
+
+## Панель усиления передвижения биомассой — в режиме «Передвижение».
+func _build_move_boost() -> void:
+	_move_panel = PanelContainer.new()
+	_move_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_move_panel.anchor_left = 1.0
+	_move_panel.anchor_right = 1.0
+	_move_panel.anchor_top = 0.5
+	_move_panel.anchor_bottom = 0.5
+	_move_panel.offset_left = -404.0
+	_move_panel.offset_right = -110.0
+	_move_panel.offset_top = -80.0
+	_move_panel.offset_bottom = 80.0
+	_move_panel.add_theme_stylebox_override("panel", _panel_style(Color(0.07, 0.10, 0.09, 0.94)))
+	add_child(_move_panel)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 6)
+	_move_panel.add_child(column)
+
+	var title := Label.new()
+	title.text = "Биомасса в движение"
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", COLOR_ACCENT)
+	column.add_child(title)
+
+	var plus_one := _boost_button(column, "−1 биомасса: +1 клетка")
+	plus_one.pressed.connect(func(): grid.set_move_boost(1))
+	var plus_two := _boost_button(column, "−2 биомассы: +2 клетки")
+	plus_two.pressed.connect(func(): grid.set_move_boost(2))
+	var plain := _boost_button(column, "обычное движение")
+	plain.pressed.connect(func(): grid.set_move_boost(0))
+	_move_panel.visible = false
 
 
 func _build_stats() -> void:
@@ -246,6 +286,7 @@ func _on_selected_changed(unit: Unit) -> void:
 	selected = unit
 	_refresh(unit, hovered)
 	_boost_panel.visible = false
+	_move_panel.visible = false
 	if unit == null:
 		_actions.visible = false
 		return
@@ -279,6 +320,7 @@ func _is_infected() -> bool:
 func _update_boost_visibility(mode: String) -> void:
 	var enough := grid != null and grid.game.biomass_of(grid.game.current_player) > 0
 	_boost_panel.visible = mode == "attack" and _is_infected() and enough
+	_move_panel.visible = mode == "move" and _is_infected() and enough
 
 
 func _update_buttons(unit: Unit) -> void:
@@ -287,8 +329,14 @@ func _update_buttons(unit: Unit) -> void:
 	# «Действие» показываем только когда оно есть у фигуры (текст карты).
 	var has_action := unit.ability_text.contains("Действие")
 	_btn_action.visible = has_action
+	# Усиление брони — только заражённым, и не в момент, когда биомассы нет.
+	_btn_armor.visible = _is_infected()
 	# Панель подстраивает высоту под число кнопок: отступы 10+10, шаг 10.
-	var count := 3 if has_action else 2
+	var count := 2
+	if has_action:
+		count += 1
+	if _btn_armor.visible:
+		count += 1
 	var height := 20.0 + count * ICON_SIZE.y + (count - 1) * 10.0
 	_actions.offset_top = -height * 0.5
 	_actions.offset_bottom = height * 0.5
