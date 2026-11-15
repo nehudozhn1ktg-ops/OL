@@ -16,11 +16,12 @@ func _init(seed_value: int = 0) -> void:
 		rng.randomize()
 
 
-## D4 — по правилам атаки и защиты.
-func d4() -> int:
+## D4 — по правилам атаки и защиты. min_value задаёт нижнюю границу
+## (всплеск эссенции поднимает её до 3).
+func d4(min_value: int = 1) -> int:
 	if not forced_rolls.is_empty():
 		return forced_rolls.pop_front()
-	return rng.randi_range(1, 4)
+	return rng.randi_range(min_value, 4)
 
 
 ## Монета при проигрыше в защите: "white" — выжил и ранен, "black" — погиб.

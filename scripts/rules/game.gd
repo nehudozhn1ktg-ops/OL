@@ -316,11 +316,26 @@ func attack_with_biomass(attacker: Unit, defender: Unit,
 	return _strike(attacker, defender, 1 if damage_up else 0)
 
 
+## Всплеск эссенции (ADR-011): 1 эссенция — кубик атаки минимум 3. Только атака,
+## только активированные фигуры.
+func attack_with_surge(attacker: Unit, defender: Unit) -> Dictionary:
+	var verdict := can_attack(attacker, defender)
+	if not verdict["ok"]:
+		return {"hit": false, "damage": 0, "defense": 0, "killed": false,
+			"wounded": false, "coin": "", "reason": verdict["reason"]}
+	if essence_of(attacker.owner) < 1:
+		return {"hit": false, "damage": 0, "defense": 0, "killed": false,
+			"wounded": false, "coin": "", "reason": "не хватает эссенции для всплеска"}
+	spend_essence(attacker.owner, 1)
+	attacker.attacked = true
+	return _strike(attacker, defender, 0, 3)
+
+
 ## Сам бросок боя, без проверки хода и без расхода атаки: общий путь для
 ## обычной атаки и для реакции укрепления (ADR-002).
-func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0) -> Dictionary:
+func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0, min_attack: int = 1) -> Dictionary:
 	var shot_distance: int = board.distance(attacker.coord, defender.coord)
-	var damage: int = dice.d4() + attack_bonus(attacker) + extra_damage
+	var damage: int = dice.d4(min_attack) + attack_bonus(attacker) + extra_damage
 	var defense: int = dice.d4() + defense_bonus(defender, shot_distance) + defender.armor_boost
 	defender.armor_boost = 0  # усиление брони — на одну защиту
 	var result := {"hit": damage > defense, "damage": damage, "defense": defense,
