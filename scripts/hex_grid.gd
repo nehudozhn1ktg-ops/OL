@@ -79,9 +79,11 @@ func _ready() -> void:
 ## Заражённые начинают с максимумом биомассы (фракционный лист 0–6).
 func _place_demo_units() -> void:
 	var rosters := {}
+	var factions_data := {}
 	for player in [1, 2]:
 		var faction := FactionData.load_file(GameConfig.path_for(player))
 		faction_ids[player] = str(faction.get("id", ""))
+		factions_data[player] = faction
 		rosters[player] = FactionData.roster(faction, 6)
 	if rosters.get(1, []).is_empty() or rosters.get(2, []).is_empty():
 		push_warning("фракция не загрузилась, ставлю заглушки")
@@ -106,6 +108,7 @@ func _place_demo_units() -> void:
 			game.start_biomass(player)
 		elif faction_ids[player] == "undead":
 			game.start_essence(player)
+			game.register_summonables(player, FactionData.summonables(factions_data[player]))
 
 
 func _place_team(player: int, anchor: Vector2i, roster: Array) -> void:

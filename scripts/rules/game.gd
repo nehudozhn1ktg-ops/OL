@@ -28,6 +28,14 @@ const ESSENCE_MAX := 4
 const ESSENCE_START := 1
 const ESSENCE_PER_KILL := 1
 
+## Цены заклинаний Некроманта (ADR-012, патч 7): пешка — 2, командир — 3,
+## уничтожение чужой пешки/командира — 4.
+const ESSENCE_SUMMON_PAWN := 2
+const ESSENCE_SUMMON_COMMANDER := 3
+const ESSENCE_RESURRECT_PAWN := 2
+const ESSENCE_RESURRECT_COMMANDER := 3
+const ESSENCE_SLAY := 4
+
 ## Бонусы защиты от террейна (легенда карт).
 const TERRAIN_DEFENSE := {
 	Board.TERRAIN_FOREST: 1,
@@ -59,6 +67,10 @@ var winner: int = 0
 var factions: Dictionary = {}
 ## Эссенция нежити по игрокам (0–4).
 var essence: Dictionary = {}
+## Погибшие фигуры — для воскрешения Некромантом (ADR-012).
+var graveyard: Array[Unit] = []
+## Призываемые фигуры: player -> {unit_id: Dictionary (данные фракционного листа)}.
+var summon_defs: Dictionary = {}
 
 
 func setup(board_: Board, dice_: Dice = null) -> void:
@@ -74,6 +86,8 @@ func setup(board_: Board, dice_: Dice = null) -> void:
 	last_fort_reactions.clear()
 	biomass.clear()
 	essence.clear()
+	graveyard.clear()
+	summon_defs.clear()
 	winner = 0
 	begin_turn()
 
@@ -274,6 +288,8 @@ func can_attack(attacker: Unit, defender: Unit, extra_range: int = 0) -> Diction
 		return {"ok": false, "reason": "эта фигура не может атаковать"}
 	if attacker.attacked:
 		return {"ok": false, "reason": "эта фигура уже атаковала"}
+	if attacker.acted:
+		return {"ok": false, "reason": "фигура уже потратила действие (атака или действие)"}
 	if attacker.owner == defender.owner:
 		return {"ok": false, "reason": "своих не атакуют"}
 	var reach: int = attack_range(attacker) + extra_range
@@ -344,6 +360,14 @@ func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0, min_attack: 
 		return result
 
 	var owner_id := attacker.owner
+	if defender.no_wound:
+		result["killed"] = true
+		result["reason"] = "призванная фигура не имеет механики ранения — погибает"
+		_remove(defender)
+		_add_score(owner_id, 1)
+		_gain_kill_resource(owner_id)
+		return result
+
 	if defender.wounded:
 		result["killed"] = true
 		result["reason"] = "рана повторно — фигура покидает поле"
@@ -370,6 +394,7 @@ func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0, min_attack: 
 func _remove(unit: Unit) -> void:
 	var owner_id := unit.owner
 	units.erase(unit)
+	graveyard.append(unit)
 	if str(factions.get(owner_id, "")) == "infected":
 		add_biomass(owner_id, BIOMASS_PER_LOSS)
 	# Канон: потерявшая весь отряд фракция теряет и флаг. Очков за это не дают.
@@ -450,9 +475,161 @@ func _gain_kill_resource(player: int) -> void:
 			add_biomass(player, BIOMASS_PER_KILL)
 
 
+# --- Каркас «Атака ИЛИ Действие» и заклинания Некроманта (ADR-012) ------------
+
+## Есть ли у фигуры особое действие. Пока — заклинание Некроманта (cast_spell),
+## дальше сюда добавятся действия других фигур.
+func has_action(unit: Unit) -> bool:
+	return unit.abilities.has("cast_spell")
+
+
+## Общая проверка «фигура может действовать»: активирована, ход её игрока,
+## ещё не атаковала и не действовала. Атака и действие исключают друг друга.
+func can_act(unit: Unit) -> Dictionary:
+	if unit.owner != current_player:
+		return {"ok": false, "reason": "сейчас ход другого игрока"}
+	if not unit.activated:
+		return {"ok": false, "reason": "фигура не активирована: она может только двигаться"}
+	if not has_action(unit):
+		return {"ok": false, "reason": "у фигуры нет действия"}
+	if unit.attacked:
+		return {"ok": false, "reason": "фигура уже атаковала"}
+	if unit.acted:
+		return {"ok": false, "reason": "фигура уже действовала"}
+	return {"ok": true, "reason": ""}
+
+
+## Погибшие фигуры игрока — кандидаты на воскрешение.
+func graveyard_of(player: int) -> Array[Unit]:
+	var result: Array[Unit] = []
+	for unit in graveyard:
+		if unit.owner == player:
+			result.append(unit)
+	return result
+
+
+## Зарегистрировать призываемых фигур (id -> данные). Зовётся при расстановке.
+func register_summonables(player: int, defs: Dictionary) -> void:
+	summon_defs[player] = defs
+
+
+## Цена призыва/воскрешения по классу: пешка 2, командир 3. Король — нельзя
+## (проверяется раньше).
+func _spell_cost(kind: String) -> int:
+	return ESSENCE_SUMMON_PAWN if kind == "pawn" else ESSENCE_SUMMON_COMMANDER
+
+
+## Допустима ли клетка для призыва/воскрешения: соседняя с заклинателем, в поле,
+## проходима и свободна.
+func _valid_spawn_cell(caster: Unit, at: Vector2i) -> Dictionary:
+	if not board.has_cell(at):
+		return {"ok": false, "reason": "клетка за пределами поля"}
+	if board.distance(caster.coord, at) != 1:
+		return {"ok": false, "reason": "призыв только на соседнюю клетку"}
+	if not board.is_passable(at):
+		return {"ok": false, "reason": "клетка непроходима"}
+	if unit_at(at) != null:
+		return {"ok": false, "reason": "клетка занята"}
+	return {"ok": true, "reason": ""}
+
+
+## Призыв существа (патч 7): 2 эссенции — пешка, 3 — командир, на соседнюю клетку.
+func can_summon(caster: Unit, unit_id: String, at: Vector2i) -> Dictionary:
+	var verdict := can_act(caster)
+	if not verdict["ok"]:
+		return verdict
+	var defs: Dictionary = summon_defs.get(caster.owner, {})
+	if not defs.has(unit_id):
+		return {"ok": false, "reason": "нет такой призываемой фигуры: %s" % unit_id}
+	var kind := str(defs[unit_id].get("kind", "pawn"))
+	if kind == "king":
+		return {"ok": false, "reason": "короля призвать нельзя"}
+	var cost := _spell_cost(kind)
+	if essence_of(caster.owner) < cost:
+		return {"ok": false, "reason": "не хватает эссенции: нужно %d, есть %d" % [cost, essence_of(caster.owner)]}
+	return _valid_spawn_cell(caster, at)
+
+
+func summon(caster: Unit, unit_id: String, at: Vector2i) -> Dictionary:
+	var verdict := can_summon(caster, unit_id, at)
+	if not verdict["ok"]:
+		return verdict
+	var def: Dictionary = summon_defs[caster.owner][unit_id]
+	var cost := _spell_cost(str(def.get("kind", "pawn")))
+	spend_essence(caster.owner, cost)
+	var unit := add_unit_from_data(caster.owner, at, def)
+	unit.no_wound = true
+	caster.acted = true
+	return {"ok": true, "reason": "%s призван на поле (эссенции: %d)" % [str(def.get("name", unit_id)), cost]}
+
+
+## Воскрешение уничтоженной пешки/командира (патч 7): 2/3 эссенции, на соседнюю
+## клетку, раненым. Короля воскресить нельзя.
+func can_resurrect(caster: Unit, target: Unit, at: Vector2i) -> Dictionary:
+	var verdict := can_act(caster)
+	if not verdict["ok"]:
+		return verdict
+	if target == null or not graveyard.has(target):
+		return {"ok": false, "reason": "нет такой погибшей фигуры"}
+	if target.owner != caster.owner:
+		return {"ok": false, "reason": "воскрешать можно только свою фигуру"}
+	if target.kind == "king":
+		return {"ok": false, "reason": "короля воскресить нельзя"}
+	var cost := _spell_cost(target.kind)
+	if essence_of(caster.owner) < cost:
+		return {"ok": false, "reason": "не хватает эссенции: нужно %d, есть %d" % [cost, essence_of(caster.owner)]}
+	return _valid_spawn_cell(caster, at)
+
+
+func resurrect(caster: Unit, target: Unit, at: Vector2i) -> Dictionary:
+	var verdict := can_resurrect(caster, target, at)
+	if not verdict["ok"]:
+		return verdict
+	var cost := _spell_cost(target.kind)
+	spend_essence(caster.owner, cost)
+	graveyard.erase(target)
+	target.coord = at
+	target.reset_turn_state()
+	target.wounded = true
+	target.no_wound = false
+	units.append(target)
+	caster.acted = true
+	return {"ok": true, "reason": "%s воскрешён раненым (эссенции: %d)" % [target.name_ru, cost]}
+
+
+## Уничтожение заклинанием (патч 7): 4 эссенции — любая чужая пешка/командир.
+## Эссенция за это убийство не начисляется; победное очко — начисляется.
+func can_slay(caster: Unit, target: Unit) -> Dictionary:
+	var verdict := can_act(caster)
+	if not verdict["ok"]:
+		return verdict
+	if target == null or not units.has(target):
+		return {"ok": false, "reason": "нет такой фигуры на поле"}
+	if target.owner == caster.owner:
+		return {"ok": false, "reason": "своих заклинанием не уничтожают"}
+	if target.kind == "king":
+		return {"ok": false, "reason": "короля уничтожить заклинанием нельзя"}
+	if essence_of(caster.owner) < ESSENCE_SLAY:
+		return {"ok": false, "reason": "не хватает эссенции: нужно %d, есть %d" % [ESSENCE_SLAY, essence_of(caster.owner)]}
+	return {"ok": true, "reason": ""}
+
+
+func slay(caster: Unit, target: Unit) -> Dictionary:
+	var verdict := can_slay(caster, target)
+	if not verdict["ok"]:
+		return verdict
+	spend_essence(caster.owner, ESSENCE_SLAY)
+	var owner_id := caster.owner
+	var name_ru := target.name_ru
+	_remove(target)
+	_add_score(owner_id, 1)
+	caster.acted = true
+	return {"ok": true, "reason": "заклинание уничтожило %s" % name_ru}
+
+
 func attackable_targets(unit: Unit, extra_range: int = 0) -> Array[Unit]:
 	var result: Array[Unit] = []
-	if unit.owner != current_player or unit.attacked or not unit.activated:
+	if unit.owner != current_player or unit.attacked or unit.acted or not unit.activated:
 		return result
 	for other in units:
 		if can_attack(unit, other, extra_range)["ok"]:

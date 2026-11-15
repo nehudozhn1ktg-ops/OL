@@ -22,6 +22,11 @@ var ability_text: String = ""
 var wounded: bool = false
 ## Разовое усиление брони (биомасса): прибавляется к следующей защите и сбрасывается.
 var armor_boost: int = 0
+## Фигура потратила своё «действие»: атака ИЛИ особое действие (ADR-012).
+var acted: bool = false
+## Призываемые фигуры не имеют механики ранения (патч 7): проигрыш в защите —
+## сразу гибель, без монеты и состояния «ранена».
+var no_wound: bool = false
 
 # Состояние в рамках текущего хода игрока
 var activated: bool = false
@@ -78,4 +83,5 @@ func reset_turn_state() -> void:
 	activated = false
 	moved = false
 	attacked = false
+	acted = false
 	mp_left = move

@@ -23,11 +23,23 @@ static func unit_defs(faction: Dictionary) -> Array:
 	return faction.get("units", [])
 
 
-## Готовый список для расстановки: первые count фигур отряда.
+## Готовый список для расстановки: первые count фигур отряда, без призываемых
+## (ADR-009: призываемые не входят в стартовый отряд).
 static func roster(faction: Dictionary, count: int = 6) -> Array:
 	var result := []
 	for data in unit_defs(faction):
+		if bool(data.get("summonable", false)):
+			continue
 		if result.size() >= count:
 			break
 		result.append(data)
+	return result
+
+
+## Призываемые фигуры: id -> данные. Для заклинания Некроманта (ADR-012).
+static func summonables(faction: Dictionary) -> Dictionary:
+	var result := {}
+	for data in unit_defs(faction):
+		if bool(data.get("summonable", false)):
+			result[str(data.get("id", ""))] = data
 	return result

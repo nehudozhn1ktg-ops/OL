@@ -76,6 +76,7 @@
   },
   {
    "id": "blood_golem",
+   "summonable": true,
    "name": "Кровавый голем",
    "kind": "commander",
    "damage": 2,
@@ -89,6 +90,7 @@
   },
   {
    "id": "bodyguard",
+   "summonable": true,
    "name": "Телохранитель",
    "kind": "pawn",
    "damage": 0,
@@ -115,6 +117,7 @@
   },
   {
    "id": "succubus",
+   "summonable": true,
    "name": "Суккуб",
    "kind": "commander",
    "damage": 0,
@@ -128,6 +131,7 @@
   },
   {
    "id": "miner",
+   "summonable": true,
    "name": "Шахтёр",
    "kind": "pawn",
    "damage": 0,

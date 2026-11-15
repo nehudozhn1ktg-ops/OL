@@ -12,6 +12,7 @@ func _init() -> void:
 	_test_load()
 	_test_units()
 	_test_errors()
+	_test_summonables()
 
 	print("")
 	print("РЕЗУЛЬТАТ: %d проверок, провалов %d" % [checks, failures])
@@ -91,3 +92,20 @@ func _test_errors() -> void:
 	print("Ошибки загрузки")
 	var missing := FactionData.load_file("res://data/factions/нет-такого.json")
 	_check("нет файла — пустой словарь", missing.is_empty())
+
+
+func _test_summonables() -> void:
+	print("Стартовый отряд и призываемые (ADR-009)")
+	var faction := FactionData.load_file(PATH)
+	var roster := FactionData.roster(faction, 6)
+	var summonable := FactionData.summonables(faction)
+	_check("призываемых четыре", summonable.size() == 4, "= %d" % summonable.size())
+	var roster_ids := {}
+	for data in roster:
+		roster_ids[data["id"]] = true
+	for unit_id in summonable.keys():
+		_check("%s не в стартовом отряде" % unit_id, not roster_ids.has(unit_id))
+	_check("стартовый отряд без Кровавого голема", not roster_ids.has("blood_golem"))
+	_check("стартовый отряд без Телохранителя", not roster_ids.has("bodyguard"))
+	_check("стартовый отряд с Котелком", roster_ids.has("kettle"))
+	_check("стартовый отряд с Похитительницей снов", roster_ids.has("dream_thief"))
