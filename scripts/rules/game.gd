@@ -23,6 +23,11 @@ const BIOMASS_ARMOR_COST := 1
 const BIOMASS_PER_LOSS := 2
 const BIOMASS_PER_KILL := 1
 
+## Эссенция нежити: старт 1, максимум 4, +1 за убитого противника.
+const ESSENCE_MAX := 4
+const ESSENCE_START := 1
+const ESSENCE_PER_KILL := 1
+
 ## Бонусы защиты от террейна (легенда карт).
 const TERRAIN_DEFENSE := {
 	Board.TERRAIN_FOREST: 1,
@@ -50,6 +55,10 @@ var flags: Dictionary = {}
 var biomass: Dictionary = {}
 ## Победитель партии: 0 — игра идёт, иначе id победившего игрока.
 var winner: int = 0
+## Фракции по игрокам: player -> id фракции ("undead", "infected", ...).
+var factions: Dictionary = {}
+## Эссенция нежити по игрокам (0–4).
+var essence: Dictionary = {}
 
 
 func setup(board_: Board, dice_: Dice = null) -> void:
@@ -64,6 +73,7 @@ func setup(board_: Board, dice_: Dice = null) -> void:
 	flags.clear()
 	last_fort_reactions.clear()
 	biomass.clear()
+	essence.clear()
 	winner = 0
 	begin_turn()
 
@@ -324,7 +334,7 @@ func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0) -> Dictionar
 		result["reason"] = "рана повторно — фигура покидает поле"
 		_remove(defender)
 		_add_score(owner_id, 1)
-		add_biomass(owner_id, BIOMASS_PER_KILL)
+		_gain_kill_resource(owner_id)
 		return result
 
 	var coin: String = dice.coin()
@@ -334,7 +344,7 @@ func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0) -> Dictionar
 		result["reason"] = "чёрная сторона монеты — фигура погибает"
 		_remove(defender)
 		_add_score(owner_id, 1)
-		add_biomass(owner_id, BIOMASS_PER_KILL)
+		_gain_kill_resource(owner_id)
 	else:
 		defender.wounded = true
 		result["wounded"] = true
@@ -345,7 +355,8 @@ func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0) -> Dictionar
 func _remove(unit: Unit) -> void:
 	var owner_id := unit.owner
 	units.erase(unit)
-	add_biomass(owner_id, BIOMASS_PER_LOSS)
+	if str(factions.get(owner_id, "")) == "infected":
+		add_biomass(owner_id, BIOMASS_PER_LOSS)
 	# Канон: потерявшая весь отряд фракция теряет и флаг. Очков за это не дают.
 	if units_of(owner_id).is_empty():
 		_remove_flag_of(owner_id)
@@ -389,6 +400,39 @@ func boost_armor(unit: Unit) -> Dictionary:
 	spend_biomass(unit.owner, BIOMASS_ARMOR_COST)
 	unit.armor_boost += 1
 	return {"ok": true, "reason": "броня +1 к следующей защите (биомассы %d)" % biomass_of(unit.owner)}
+
+
+# --- Эссенция нежити ----------------------------------------------------------
+
+## Стартовая эссенция нежити: 1 шт. (фракционный лист).
+func start_essence(player: int) -> void:
+	essence[player] = ESSENCE_START
+
+
+func essence_of(player: int) -> int:
+	return int(essence.get(player, 0))
+
+
+func add_essence(player: int, amount: int) -> void:
+	essence[player] = mini(ESSENCE_MAX, essence_of(player) + amount)
+
+
+func spend_essence(player: int, amount: int) -> bool:
+	if amount <= 0:
+		return true
+	if essence_of(player) < amount:
+		return false
+	essence[player] = essence_of(player) - amount
+	return true
+
+
+## +ресурс за уничтоженного противника — по фракции убийцы.
+func _gain_kill_resource(player: int) -> void:
+	match str(factions.get(player, "")):
+		"undead":
+			add_essence(player, ESSENCE_PER_KILL)
+		"infected":
+			add_biomass(player, BIOMASS_PER_KILL)
 
 
 func attackable_targets(unit: Unit, extra_range: int = 0) -> Array[Unit]:

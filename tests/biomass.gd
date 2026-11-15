@@ -66,6 +66,7 @@ func _test_spend() -> void:
 func _test_gain_on_kill() -> void:
 	print("+1 за уничтоженного противника")
 	var game := _make_game()
+	game.factions[1] = "infected"
 	var attacker := game.add_unit(1, START).configure("pawn", 2, 0, 0)
 	game.activate(attacker)
 	var victim := game.add_unit(2, Vector2i(1, 0)).configure("pawn", 2, 0, 0)
@@ -79,6 +80,7 @@ func _test_gain_on_kill() -> void:
 func _test_gain_on_loss() -> void:
 	print("+2 за свою уничтоженную фигуру")
 	var game := _make_game()
+	game.factions[2] = "infected"
 	var attacker := game.add_unit(1, START).configure("pawn", 2, 0, 0)
 	game.activate(attacker)
 	var victim := game.add_unit(2, Vector2i(1, 0)).configure("pawn", 2, 0, 0)

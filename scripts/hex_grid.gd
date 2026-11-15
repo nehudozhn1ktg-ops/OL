@@ -100,9 +100,12 @@ func _place_demo_units() -> void:
 	game.add_flag(2, flags[flags.size() - 1])
 	_place_team(1, flags[0], rosters[1])
 	_place_team(2, flags[flags.size() - 1], rosters[2])
+	game.factions = faction_ids.duplicate()
 	for player in faction_ids.keys():
 		if faction_ids[player] == "infected":
 			game.start_biomass(player)
+		elif faction_ids[player] == "undead":
+			game.start_essence(player)
 
 
 func _place_team(player: int, anchor: Vector2i, roster: Array) -> void:
