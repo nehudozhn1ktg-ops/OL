@@ -9,6 +9,7 @@ var coord: Vector2i
 var name_ru: String = ""
 var kind: String = "pawn"      # king / commander / pawn
 var move: int = 2
+var mp_left: int = 2           # остаток передвижения в текущем ходу
 var damage: int = 0            # бонус к урону (прибавляется к D4)
 var armor: int = 0             # бонус к защите (прибавляется к D4)
 var range: int = 1             # дальность атаки в клетках; 1 — только соседняя
@@ -40,6 +41,7 @@ static func from_data(owner_id: int, at: Vector2i, data: Dictionary) -> Unit:
 	unit.name_ru = str(data.get("name", ""))
 	unit.kind = str(data.get("kind", "pawn"))
 	unit.move = int(data.get("move", 2))
+	unit.mp_left = unit.move
 	unit.damage = int(data.get("damage", 0))
 	unit.armor = int(data.get("armor", 0))
 	unit.range = int(data.get("range", 1))
@@ -61,6 +63,7 @@ func is_king() -> bool:
 func configure(kind_name: String, move_value: int, damage_bonus: int, armor_bonus: int) -> Unit:
 	kind = kind_name
 	move = move_value
+	mp_left = move_value
 	damage = damage_bonus
 	armor = armor_bonus
 	return self
@@ -75,3 +78,4 @@ func reset_turn_state() -> void:
 	activated = false
 	moved = false
 	attacked = false
+	mp_left = move

@@ -158,7 +158,7 @@ func can_move(unit: Unit, to: Vector2i, extra_move: int = 0) -> Dictionary:
 		return {"ok": false, "reason": "эта фигура уже двигалась"}
 	if not board.has_cell(to):
 		return {"ok": false, "reason": "за пределами поля"}
-	var step: int = unit.move + extra_move
+	var step: int = unit.mp_left + extra_move
 	if board.distance(unit.coord, to) > step:
 		return {"ok": false, "reason": "дальше, чем позволяет передвижение (%d)" % step}
 	if not reachable(unit, extra_move).has(to):
@@ -171,7 +171,7 @@ func reachable(unit: Unit, extra_move: int = 0) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
 	if unit.owner != current_player or unit.moved:
 		return result
-	var step: int = unit.move + extra_move
+	var step: int = unit.mp_left + extra_move
 	var seen := {unit.coord: 0}
 	var queue: Array = [[unit.coord, 0]]
 	while not queue.is_empty():
@@ -198,6 +198,7 @@ func move_unit(unit: Unit, to: Vector2i, extra_move: int = 0) -> bool:
 		return false
 	unit.coord = to
 	unit.moved = true
+	unit.mp_left = 0
 	_resolve_fort_reactions(unit)
 	return true
 
@@ -215,6 +216,41 @@ func move_with_biomass(unit: Unit, to: Vector2i, extra_move: int) -> Dictionary:
 	spend_biomass(unit.owner, cost)
 	move_unit(unit, to, extra)
 	return {"ok": true, "reason": "передвижение +%d за %d биомассы" % [extra, cost]}
+
+
+# --- Обмен (Линдвурм, ADR-010) ----------------------------------------------
+
+## Обмен местами с другой своей фигурой: стоит 2 передвижения, повторяется,
+## пока хватает пула. Цель — любая своя фигура, любое расстояние.
+func can_swap(unit: Unit, target: Unit) -> Dictionary:
+	if unit.owner != current_player:
+		return {"ok": false, "reason": "сейчас ход другого игрока"}
+	if target == null or not units.has(target):
+		return {"ok": false, "reason": "нет такой фигуры"}
+	if target == unit:
+		return {"ok": false, "reason": "нельзя меняться с собой"}
+	if target.owner != unit.owner:
+		return {"ok": false, "reason": "меняться можно только со своей фигурой"}
+	if unit.moved:
+		return {"ok": false, "reason": "фигура уже потратила движение"}
+	if unit.mp_left < 2:
+		return {"ok": false, "reason": "не хватает передвижения: нужно 2, есть %d" % unit.mp_left}
+	if not unit.abilities.has("swap_places_with_any_figure"):
+		return {"ok": false, "reason": "эта фигура не умеет обмениваться"}
+	return {"ok": true, "reason": ""}
+
+
+## Обмен координатами, тратит 2 MP. Не помечает фигуру «сдвинутой» — она может
+## обменяться ещё раз или дойти остатком пула.
+func swap(unit: Unit, target: Unit) -> Dictionary:
+	var verdict := can_swap(unit, target)
+	if not verdict["ok"]:
+		return verdict
+	var a := unit.coord
+	unit.coord = target.coord
+	target.coord = a
+	unit.mp_left -= 2
+	return {"ok": true, "reason": "обмен выполнен (осталось %d передвижения)" % unit.mp_left}
 
 
 # --- Бой --------------------------------------------------------------------
