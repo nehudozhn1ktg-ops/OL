@@ -51,6 +51,21 @@ Git: `C:\Git\cmd\git.exe` (полным путём, в PATH его нет). Pyth
 читать `$log` и `$p.ExitCode`.
 Навык проекта `onelife` подключён в DSH — команды и правила подтягиваются сами.
 
+## Инструменты агента (2026-11-15)
+
+Базовая модель текстовая, картинки не видит. Зрение и чтение текста — через
+хелперы:
+
+- **Зрение**: `python tools/vision.py <картинка> [вопрос]` — локальное описание
+  через Ollama (модель `moondream`, API `http://127.0.0.1:11434`). Запуск сервера:
+  `Start-Process "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" -ArgumentList serve`.
+  Английский промпт работает лучше русского.
+- **OCR**: `python tools/ocr.py <картинка>` — точный русский/английский текст
+  (Tesseract `C:\Program Files\Tesseract-OCR\tesseract.exe`, `rus` в
+  `C:\Users\Admin\.tessdata`).
+- **Секреты** (токены VK/Telegram и т.п.) — в `.secrets/` (gitignored). В `.md`
+  и в чат не писать. Python: `C:\Users\Admin\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe`.
+
 ## Что сделано к этому моменту
 
 - Правила 0.7.1 перенесены в канон (`docs/canon/01-core.md`, полный текст рядом).

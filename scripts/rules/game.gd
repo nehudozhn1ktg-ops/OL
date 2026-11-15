@@ -10,6 +10,8 @@ class_name Game
 
 const MAX_ACTIVATIONS := 2
 const FLAG_POINTS := 3
+const WIN_POINTS_FFA := 8
+const WIN_POINTS_TEAM := 16
 
 ## Биомасса заражённых: шкала на фракционном листе 0–6, в начале матча — максимум.
 const BIOMASS_MAX := 6
@@ -46,6 +48,8 @@ var last_fort_reactions: Array[Dictionary] = []
 var flags: Dictionary = {}
 ## Биомасса заражённых по игрокам (0–6). Начисляется за бои, тратится на усиления.
 var biomass: Dictionary = {}
+## Победитель партии: 0 — игра идёт, иначе id победившего игрока.
+var winner: int = 0
 
 
 func setup(board_: Board, dice_: Dice = null) -> void:
@@ -60,6 +64,7 @@ func setup(board_: Board, dice_: Dice = null) -> void:
 	flags.clear()
 	last_fort_reactions.clear()
 	biomass.clear()
+	winner = 0
 	begin_turn()
 
 
@@ -282,7 +287,7 @@ func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0) -> Dictionar
 		result["killed"] = true
 		result["reason"] = "рана повторно — фигура покидает поле"
 		_remove(defender)
-		scores[owner_id] = int(scores.get(owner_id, 0)) + 1
+		_add_score(owner_id, 1)
 		add_biomass(owner_id, BIOMASS_PER_KILL)
 		return result
 
@@ -292,7 +297,7 @@ func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0) -> Dictionar
 		result["killed"] = true
 		result["reason"] = "чёрная сторона монеты — фигура погибает"
 		_remove(defender)
-		scores[owner_id] = int(scores.get(owner_id, 0)) + 1
+		_add_score(owner_id, 1)
 		add_biomass(owner_id, BIOMASS_PER_KILL)
 	else:
 		defender.wounded = true
@@ -454,7 +459,7 @@ func attack_flag(attacker: Unit, coord: Vector2i) -> Dictionary:
 
 	_remove_flag(coord)
 	var owner_id := attacker.owner
-	scores[owner_id] = int(scores.get(owner_id, 0)) + FLAG_POINTS
+	_add_score(owner_id, FLAG_POINTS)
 	return {"destroyed": true, "roll": roll,
 		"reason": "бросок %d — флаг уничтожен (+%d очка)" % [roll, FLAG_POINTS]}
 
@@ -481,8 +486,29 @@ func collect_points(player: int) -> int:
 	for unit in units:
 		if unit.owner == player and board.terrain_at(unit.coord) == Board.TERRAIN_KEY:
 			gained += 1
-	scores[player] = int(scores.get(player, 0)) + gained
+	_add_score(player, gained)
 	return gained
+
+
+## Условие победы (канон): 8 очков каждый за себя, 16 — команда. Победа сразу.
+func win_points() -> int:
+	return WIN_POINTS_FFA
+
+
+func check_winner() -> int:
+	if winner != 0:
+		return winner
+	for player in scores.keys():
+		if int(scores[player]) >= win_points():
+			winner = player
+			return winner
+	return 0
+
+
+## Начисление очков с проверкой победы.
+func _add_score(player: int, amount: int) -> void:
+	scores[player] = int(scores.get(player, 0)) + amount
+	check_winner()
 
 
 func begin_turn() -> void:
