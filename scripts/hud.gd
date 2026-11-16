@@ -1,11 +1,11 @@
 extends Control
 class_name Hud
 
-## Интерфейс партии: панель действий справа, подсказка способности при наведении
-## и постоянная строка характеристик выбранной/наведённой фигуры.
+## Интерфейс партии: плашка действий и характеристик у выбранной фигуры,
+## подсказка по тайлу/фигуре при наведении, счётчик ресурса фракции.
 ##
-## Формат характеристик по канону боя: D4 + бонус, поэтому урон и броня
-## показываются диапазоном «бонус+1 … бонус+4», передвижение — одним числом.
+## Характеристики показываются диапазоном (D4 + бонус) с разложением бонуса
+## по источникам: броня фигуры, террейн (лес/укрепление), аура, усиление.
 
 const ICON_DAMAGE := preload("res://assets/ui/damage.png")
 const ICON_MOVE := preload("res://assets/ui/move.png")
@@ -17,26 +17,24 @@ const COLOR_DIM := Color(0.72, 0.74, 0.78)
 const COLOR_ACCENT := Color("#ffd447")
 
 const ICON_SIZE := Vector2(56.0, 56.0)
-const STAT_ICON_SIZE := Vector2(34.0, 34.0)
 
 var grid: HexGrid = null
 var selected: Unit = null
 var hovered: Unit = null
+var hovered_coord: Vector2i = Vector2i.ZERO
+var has_tile_hover: bool = false
 
 var _actions: PanelContainer
+var _lbl_stats: Label
 var _btn_move: TextureButton
 var _btn_attack: TextureButton
 var _btn_action: TextureButton
 var _btn_armor: TextureButton
 var _move_panel: PanelContainer
-var _stats: PanelContainer
-var _lbl_damage: Label
-var _lbl_move: Label
-var _lbl_armor: Label
+var _resource: Label
 var _tooltip: PanelContainer
 var _lbl_tooltip: Label
 var _boost_panel: PanelContainer
-var _lbl_biomass: Label
 ## Подсказка ходит за курсором; на снимке её ставят в заданную точку.
 var _follow_mouse: bool = true
 
@@ -47,9 +45,9 @@ func _ready() -> void:
 	_build_actions()
 	_build_boost()
 	_build_move_boost()
-	_build_stats()
+	_build_resource()
 	_build_tooltip()
-	_refresh(null, null)
+	_refresh_resource()
 
 
 func bind(grid_: HexGrid) -> void:
@@ -57,27 +55,30 @@ func bind(grid_: HexGrid) -> void:
 	grid.unit_selected_changed.connect(_on_selected_changed)
 	grid.unit_hovered_changed.connect(_on_hovered_changed)
 	grid.action_changed.connect(_on_action_changed)
+	grid.tile_hovered_changed.connect(_on_tile_hovered_changed)
 
 
 # --- Построение --------------------------------------------------------------
 
+## Плашка действий: позиционируется у выбранной фигуры (см. _position_plaque).
 func _build_actions() -> void:
 	_actions = PanelContainer.new()
 	_actions.mouse_filter = Control.MOUSE_FILTER_STOP
-	_actions.anchor_left = 1.0
-	_actions.anchor_right = 1.0
-	_actions.anchor_top = 0.5
-	_actions.anchor_bottom = 0.5
-	_actions.offset_left = -96.0
-	_actions.offset_right = -16.0
-	_actions.offset_top = -124.0
-	_actions.offset_bottom = 124.0
 	_actions.add_theme_stylebox_override("panel", _panel_style())
 	add_child(_actions)
 
 	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 10)
+	column.add_theme_constant_override("separation", 8)
 	_actions.add_child(column)
+
+	_lbl_stats = Label.new()
+	_lbl_stats.add_theme_font_size_override("font_size", 15)
+	_lbl_stats.add_theme_color_override("font_color", COLOR_TEXT)
+	column.add_child(_lbl_stats)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	column.add_child(row)
 
 	_btn_move = _make_button(ICON_MOVE, "Передвижение")
 	_btn_move.pressed.connect(func(): _choose("move"))
@@ -87,10 +88,10 @@ func _build_actions() -> void:
 	_btn_action.pressed.connect(func(): _choose("action"))
 	_btn_armor = _make_button(ICON_ARMOR, "Броня +1 (биомасса)")
 	_btn_armor.pressed.connect(func(): grid.boost_selected_armor())
-	column.add_child(_btn_move)
-	column.add_child(_btn_attack)
-	column.add_child(_btn_action)
-	column.add_child(_btn_armor)
+	row.add_child(_btn_move)
+	row.add_child(_btn_attack)
+	row.add_child(_btn_action)
+	row.add_child(_btn_armor)
 	_actions.visible = false
 
 
@@ -171,45 +172,22 @@ func _build_move_boost() -> void:
 	_move_panel.visible = false
 
 
-func _build_stats() -> void:
-	_stats = PanelContainer.new()
-	_stats.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_stats.anchor_left = 0.5
-	_stats.anchor_right = 0.5
-	_stats.anchor_top = 0.0
-	_stats.anchor_bottom = 0.0
-	_stats.offset_left = -280.0
-	_stats.offset_right = 280.0
-	_stats.offset_top = 64.0
-	_stats.offset_bottom = 122.0
-	_stats.add_theme_stylebox_override("panel", _panel_style())
-	add_child(_stats)
-
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 26)
-	_stats.add_child(row)
-
-	var damage_box := _stat_box(ICON_DAMAGE)
-	_lbl_damage = damage_box[1]
-	row.add_child(damage_box[0])
-
-	var move_box := _stat_box(ICON_MOVE)
-	_lbl_move = move_box[1]
-	row.add_child(move_box[0])
-
-	var armor_box := _stat_box(ICON_ARMOR)
-	_lbl_armor = armor_box[1]
-	row.add_child(armor_box[0])
-
-	var sep := VSeparator.new()
-	row.add_child(sep)
-	_lbl_biomass = Label.new()
-	_lbl_biomass.add_theme_font_size_override("font_size", 18)
-	_lbl_biomass.add_theme_color_override("font_color", COLOR_ACCENT)
-	_lbl_biomass.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(_lbl_biomass)
-	_stats.visible = false
+## Счётчик ресурса фракции (биомасса/эссенция) в правом верхнем углу.
+func _build_resource() -> void:
+	_resource = Label.new()
+	_resource.anchor_left = 1.0
+	_resource.anchor_right = 1.0
+	_resource.anchor_top = 0.0
+	_resource.anchor_bottom = 0.0
+	_resource.offset_left = -240.0
+	_resource.offset_right = -16.0
+	_resource.offset_top = 20.0
+	_resource.offset_bottom = 54.0
+	_resource.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_resource.add_theme_font_size_override("font_size", 20)
+	_resource.add_theme_color_override("font_color", COLOR_ACCENT)
+	_resource.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_resource)
 
 
 func _build_tooltip() -> void:
@@ -259,50 +237,25 @@ func _make_button(texture: Texture2D, hint: String) -> TextureButton:
 	return button
 
 
-## Пара «иконка + значение» для строки характеристик.
-func _stat_box(texture: Texture2D) -> Array:
-	var box := HBoxContainer.new()
-	box.add_theme_constant_override("separation", 6)
-
-	var icon := TextureRect.new()
-	icon.texture = texture
-	icon.custom_minimum_size = STAT_ICON_SIZE
-	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	box.add_child(icon)
-
-	var label := Label.new()
-	label.text = "—"
-	label.add_theme_font_size_override("font_size", 26)
-	label.add_theme_color_override("font_color", COLOR_TEXT)
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	box.add_child(label)
-	return [box, label]
-
-
 # --- Реакция на события поля ------------------------------------------------
 
 func _on_selected_changed(unit: Unit) -> void:
 	selected = unit
-	_refresh(unit, hovered)
 	_boost_panel.visible = false
 	_move_panel.visible = false
-	if unit == null:
-		_actions.visible = false
-		return
-	if not _actions.visible:
-		_actions.visible = true
-	_update_buttons(unit)
+	_refresh_plaque(unit)
 
 
 func _on_hovered_changed(unit: Unit) -> void:
 	hovered = unit
 	_follow_mouse = true
-	if unit != null:
-		_show_tooltip(unit)
-	else:
-		_tooltip.visible = false
-	_refresh(selected, unit)
+	_refresh_tooltip()
+
+
+func _on_tile_hovered_changed(coord: Vector2i, has_hover: bool) -> void:
+	hovered_coord = coord
+	has_tile_hover = has_hover
+	_refresh_tooltip()
 
 
 func _on_action_changed(mode: String) -> void:
@@ -323,23 +276,100 @@ func _update_boost_visibility(mode: String) -> void:
 	_move_panel.visible = mode == "move" and _is_infected() and enough
 
 
+# --- Плашка действий ---------------------------------------------------------
+
+func _refresh_plaque(unit: Unit) -> void:
+	if unit == null:
+		_actions.visible = false
+		return
+	_lbl_stats.text = "\n".join(_stat_lines(unit))
+	_update_buttons(unit)
+	_actions.visible = true
+	_actions.reset_size()
+	_position_plaque(unit)
+
+
+func _position_plaque(unit: Unit) -> void:
+	var pos := grid.figure_screen_pos(unit)
+	var view := get_viewport_rect().size
+	var size := _actions.size
+	var target := pos + Vector2(-size.x * 0.5, -size.y - grid.hex_size - 6.0)
+	target.x = clampf(target.x, 8.0, maxf(8.0, view.x - size.x - 8.0))
+	target.y = clampf(target.y, 8.0, maxf(8.0, view.y - size.y - 8.0))
+	_actions.position = target
+
+
 func _update_buttons(unit: Unit) -> void:
 	_btn_move.disabled = unit.moved
-	_btn_attack.disabled = unit.attacked or not unit.can_attack
-	# «Действие» показываем только когда оно есть у фигуры (текст карты).
-	var has_action := unit.ability_text.contains("Действие")
+	_btn_attack.disabled = unit.attacked or unit.acted or not unit.can_attack
+	# «Действие» показываем только когда оно реализовано у фигуры (cast_spell).
+	var has_action := grid.game.has_action(unit)
 	_btn_action.visible = has_action
-	# Усиление брони — только заражённым, и не в момент, когда биомассы нет.
+	_btn_action.disabled = unit.attacked or unit.acted
+	# Усиление брони — только заражённым.
 	_btn_armor.visible = _is_infected()
-	# Панель подстраивает высоту под число кнопок: отступы 10+10, шаг 10.
-	var count := 2
-	if has_action:
-		count += 1
-	if _btn_armor.visible:
-		count += 1
-	var height := 20.0 + count * ICON_SIZE.y + (count - 1) * 10.0
-	_actions.offset_top = -height * 0.5
-	_actions.offset_bottom = height * 0.5
+
+
+func _stat_lines(unit: Unit) -> Array[String]:
+	var game: Game = grid.game
+	var terrain := game.terrain_defense_bonus(unit, 1)
+	var aura := game.aura_defense_bonus(unit)
+	var armor_total := unit.armor + terrain + aura + unit.armor_boost
+	var lines: Array[String] = []
+	lines.append("Урон %d-%d (D4 + %d)" % [unit.damage + 1, unit.damage + 4, unit.damage])
+	var parts: Array[String] = ["броня %d" % unit.armor]
+	if terrain > 0:
+		parts.append("%s +%d" % [grid.terrain_name(game.board.terrain_at(unit.coord)), terrain])
+	if aura > 0:
+		parts.append("аура +%d" % aura)
+	if unit.armor_boost > 0:
+		parts.append("усиление +%d" % unit.armor_boost)
+	lines.append("Броня %d-%d (D4 + %s)" % [armor_total + 1, armor_total + 4, " + ".join(parts)])
+	lines.append("Движение %d" % unit.move)
+	if unit.range > 1:
+		lines.append("Дальность атаки %d" % unit.range)
+	return lines
+
+
+# --- Подсказка (тайл + фигура) -----------------------------------------------
+
+func _refresh_tooltip() -> void:
+	var lines: Array[String] = []
+	if hovered != null:
+		lines.append_array(_figure_lines(hovered))
+		lines.append("")
+	if has_tile_hover and grid.board.has_cell(hovered_coord):
+		lines.append_array(_tile_lines(hovered_coord))
+	if lines.is_empty():
+		_tooltip.visible = false
+		return
+	_lbl_tooltip.text = "\n".join(lines)
+	_tooltip.visible = true
+	_tooltip.reset_size()
+
+
+func _figure_lines(unit: Unit) -> Array[String]:
+	var kind_name := {"king": "Король", "commander": "Командир", "pawn": "Пешка"}
+	var title := unit.name_ru if unit.name_ru != "" else "Фигура"
+	var lines: Array[String] = ["%s · %s игрока %d" % [title, kind_name.get(unit.kind, ""), unit.owner]]
+	if unit.wounded:
+		lines.append("Ранена.")
+	if unit.range > 1:
+		lines.append("Дальность атаки: %d кл." % unit.range)
+	if unit.ability_text != "":
+		lines.append(unit.ability_text)
+	else:
+		lines.append("Особой способности нет.")
+	return lines
+
+
+func _tile_lines(coord: Vector2i) -> Array[String]:
+	var terrain := grid.board.terrain_at(coord)
+	var lines: Array[String] = ["Клетка: %s" % grid.terrain_name(terrain)]
+	var effect := grid.terrain_effect(terrain)
+	if effect != "":
+		lines.append(effect)
+	return lines
 
 
 func _choose(mode: String) -> void:
@@ -351,51 +381,33 @@ func _choose(mode: String) -> void:
 	grid.choose_action(mode)
 
 
-# --- Содержимое ---------------------------------------------------------------
-
-func _refresh(selected_unit: Unit, hovered_unit: Unit) -> void:
-	var unit: Unit = hovered_unit if hovered_unit != null else selected_unit
-	if unit == null:
-		_stats.visible = false
+func _refresh_resource() -> void:
+	if grid == null or grid.game == null:
+		_resource.visible = false
 		return
-	_stats.visible = true
-	# D4 + бонус: минимальное значение — бонус + 1, максимальное — бонус + 4.
-	_lbl_damage.text = "%d-%d" % [unit.damage + 1, unit.damage + 4]
-	_lbl_move.text = "%d" % unit.move
-	_lbl_armor.text = "%d-%d" % [unit.armor + 1, unit.armor + 4]
-
-
-func _show_tooltip(unit: Unit) -> void:
-	var title := unit.name_ru if unit.name_ru != "" else "Фигура"
-	var kind_name := {"king": "Король", "commander": "Командир", "pawn": "Пешка"}
-	var lines: Array[String] = ["%s · %s игрока %d" % [title, kind_name.get(unit.kind, ""), unit.owner]]
-	if unit.wounded:
-		lines.append("Ранена.")
-	if unit.range > 1:
-		lines.append("Дальность атаки: %d кл." % unit.range)
-	if unit.ability_text != "":
-		lines.append(unit.ability_text)
+	var player := grid.game.current_player
+	var faction := str(grid.faction_ids.get(player, ""))
+	if faction == "infected":
+		_resource.text = "Биомасса %d" % grid.game.biomass_of(player)
+		_resource.visible = true
+	elif faction == "undead":
+		_resource.text = "Эссенция %d" % grid.game.essence_of(player)
+		_resource.visible = true
 	else:
-		lines.append("Особой способности нет.")
-	_lbl_tooltip.text = "\n".join(lines)
-	_tooltip.visible = true
-	_tooltip.reset_size()
+		_resource.visible = false
 
 
 ## Только для отладочного снимка: подсказка в заданной точке, без курсора.
 func show_tooltip_at(unit: Unit, at: Vector2) -> void:
-	_show_tooltip(unit)
 	_follow_mouse = false
+	_lbl_tooltip.text = "\n".join(_figure_lines(unit))
 	_tooltip.reset_size()
 	_tooltip.position = at
+	_tooltip.visible = true
 
 
 func _process(_delta: float) -> void:
-	if _lbl_biomass != null:
-		var infected := _is_infected()
-		_lbl_biomass.visible = infected
-		if infected:
-			_lbl_biomass.text = "Биомасса %d" % grid.game.biomass_of(grid.game.current_player)
+	_refresh_resource()
 	if _tooltip.visible and _follow_mouse:
 		var mouse := get_global_mouse_position()
 		var view := get_viewport_rect().size

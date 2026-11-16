@@ -7,6 +7,7 @@ signal status(text: String)
 signal unit_selected_changed(unit: Unit)
 signal unit_hovered_changed(unit: Unit)
 signal action_changed(mode: String)
+signal tile_hovered_changed(coord: Vector2i, has_hover: bool)
 
 const SQRT3 := 1.7320508075688772
 const MAP_PATH := "res://assets/maps/data/1x1x1.json"
@@ -417,7 +418,7 @@ func _click(coord: Vector2i) -> void:
 		status.emit("Выберите действие справа: «атака», чтобы ударить по цели")
 		return
 
-	status.emit("Клетка (%d, %d) · %s" % [coord.x, coord.y, _terrain_name(board.terrain_at(coord))])
+	status.emit("Клетка (%d, %d) · %s" % [coord.x, coord.y, terrain_name(board.terrain_at(coord))])
 
 
 func _clear_selection() -> void:
@@ -442,7 +443,7 @@ func _reaction_note() -> String:
 	return " Реакция укрепления: " + "; ".join(parts) + "."
 
 
-func _terrain_name(terrain: int) -> String:
+func terrain_name(terrain: int) -> String:
 	match terrain:
 		Board.TERRAIN_GRASS:
 			return "трава"
@@ -462,6 +463,30 @@ func _terrain_name(terrain: int) -> String:
 			return "?"
 
 
+## Человекочитаемый эффект террейна — для подсказки при наведении на клетку.
+func terrain_effect(terrain: int) -> String:
+	match terrain:
+		Board.TERRAIN_FOREST:
+			return "+1 к защите при атаке в упор."
+		Board.TERRAIN_FORT:
+			return "+1 к защите; стоящая здесь фигура бьёт каждого врага, остановившегося рядом."
+		Board.TERRAIN_KEY:
+			return "Ключевая точка: +1 очко за свою фигуру в начале хода."
+		Board.TERRAIN_WATER:
+			return "Непроходима (ADR-001)."
+		Board.TERRAIN_FLAG:
+			return "Препятствие; уничтожается броском 4 (король 3-4), +3 очка."
+		Board.TERRAIN_CAMP:
+			return "Лагерь: зона развёртывания."
+		_:
+			return ""
+
+
+## Позиция гекса фигуры в экранных координатах — для плашки действий в HUD.
+func figure_screen_pos(unit: Unit) -> Vector2:
+	return to_global(hex_to_pixel(unit.coord))
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
 		var coord := pixel_to_hex(get_local_mouse_position())
@@ -470,9 +495,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				hovered = coord
 				has_hover = true
 				queue_redraw()
+				tile_hovered_changed.emit(hovered, true)
 		elif has_hover:
 			has_hover = false
 			queue_redraw()
+			tile_hovered_changed.emit(hovered, false)
 		var under_cursor: Unit = game.unit_at(coord) if board.has_cell(coord) else null
 		if under_cursor != hovered_unit:
 			hovered_unit = under_cursor
