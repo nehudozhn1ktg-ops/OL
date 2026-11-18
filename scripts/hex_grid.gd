@@ -113,35 +113,7 @@ func _place_demo_units() -> void:
 
 
 func _place_team(player: int, anchor: Vector2i, roster: Array) -> void:
-	var spots := _free_spots(anchor, roster.size(), 4)
-	for i in min(spots.size(), roster.size()):
-		game.add_unit_from_data(player, spots[i], roster[i])
-
-
-## Свободные проходимые клетки вокруг якоря, по возрастанию расстояния.
-func _free_spots(anchor: Vector2i, count: int, max_dist: int) -> Array[Vector2i]:
-	var result: Array[Vector2i] = []
-	var seen := {anchor: true}
-	var queue: Array = [[anchor, 0]]
-	while not queue.is_empty() and result.size() < count:
-		var entry: Array = queue.pop_front()
-		var current: Vector2i = entry[0]
-		var dist: int = entry[1]
-		if dist >= max_dist:
-			continue
-		for next in board.neighbors(current):
-			if seen.has(next) or not board.has_cell(next):
-				continue
-			seen[next] = true
-			queue.append([next, dist + 1])
-			if game.unit_at(next) != null:
-				continue
-			if not board.is_passable(next):
-				continue
-			if board.terrain_at(next) == Board.TERRAIN_FLAG:
-				continue
-			result.append(next)
-	return result
+	game.place_roster(player, anchor, roster)
 
 
 func _fit_to_view() -> void:

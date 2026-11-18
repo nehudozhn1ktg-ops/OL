@@ -104,6 +104,19 @@ func add_unit_from_data(owner: int, at: Vector2i, data: Dictionary) -> Unit:
 	return unit
 
 
+## Расставить отряд на клетках лагеря (соседях флага) в случайном порядке.
+## Канон: фигуры — на клетках «лагерь» рядом с флагом, какая фигура на какой
+## клетке — случайно. Число клеток берётся по размеру отряда (не всегда 6).
+func place_roster(player: int, anchor: Vector2i, roster: Array) -> Array[Unit]:
+	var spots := board.deployment_cells(anchor, roster.size())
+	var order := roster.duplicate()
+	order.shuffle()
+	var placed: Array[Unit] = []
+	for i in mini(spots.size(), order.size()):
+		placed.append(add_unit_from_data(player, spots[i], order[i]))
+	return placed
+
+
 func unit_at(coord: Vector2i) -> Unit:
 	for unit in units:
 		if unit.coord == coord:

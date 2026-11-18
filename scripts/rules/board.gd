@@ -140,3 +140,28 @@ func reachable(from: Vector2i, steps: int, traits: Dictionary = {}) -> Array[Vec
 			queue.append(next)
 			result.append(next)
 	return result
+
+
+## Клетки для расстановки отряда («лагерь»): сначала соседи якоря (флага),
+## затем ближайшие свободные проходимые клетки — если сосед непроходим или вне
+## поля. Порядок детерминированный (BFS по расстоянию); случайность задаёт
+## вызывающий (перемешиванием отряда). Флаг и вода исключаются.
+func deployment_cells(anchor: Vector2i, count: int) -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	if not cells.has(anchor):
+		return result
+	var seen: Dictionary = {anchor: true}
+	var queue: Array = [anchor]
+	while not queue.is_empty() and result.size() < count:
+		var current: Vector2i = queue.pop_front()
+		for next in neighbors(current):
+			if result.size() >= count:
+				return result
+			if seen.has(next) or not cells.has(next):
+				continue
+			seen[next] = true
+			queue.append(next)
+			if cells[next] == TERRAIN_FLAG or not is_passable(next):
+				continue
+			result.append(next)
+	return result
