@@ -30,7 +30,6 @@ var _actions: PanelContainer
 var _btn_move: TextureButton
 var _btn_attack: TextureButton
 var _btn_action: TextureButton
-var _btn_armor: TextureButton
 var _stats: PanelContainer
 var _lbl_damage: Label
 var _lbl_damage_src: Label
@@ -42,6 +41,8 @@ var _tooltip: PanelContainer
 var _lbl_tooltip: Label
 var _boost_panel: PanelContainer
 var _move_panel: PanelContainer
+## Панель ответа защитника: «Броня +1» за биомассу или пропустить (ADR-015).
+var _defend_panel: PanelContainer
 ## Подсказка ходит за курсором; на снимке её ставят в заданную точку.
 var _follow_mouse: bool = true
 
@@ -53,6 +54,7 @@ func _ready() -> void:
 	_build_stats()
 	_build_boost()
 	_build_move_boost()
+	_build_defend()
 	_build_tooltip()
 	_refresh_resource()
 
@@ -63,6 +65,7 @@ func bind(grid_: HexGrid) -> void:
 	grid.unit_hovered_changed.connect(_on_hovered_changed)
 	grid.action_changed.connect(_on_action_changed)
 	grid.tile_hovered_changed.connect(_on_tile_hovered_changed)
+	grid.defense_requested.connect(_on_defense_requested)
 
 
 # --- Построение --------------------------------------------------------------
@@ -84,12 +87,9 @@ func _build_actions() -> void:
 	_btn_attack.pressed.connect(func(): _choose("attack"))
 	_btn_action = _make_button(ICON_ACTION, "Действие")
 	_btn_action.pressed.connect(func(): _choose("action"))
-	_btn_armor = _make_button(ICON_ARMOR, "Броня +1 (биомасса)")
-	_btn_armor.pressed.connect(func(): grid.boost_selected_armor())
 	row.add_child(_btn_move)
 	row.add_child(_btn_attack)
 	row.add_child(_btn_action)
-	row.add_child(_btn_armor)
 	_actions.visible = false
 
 
@@ -199,6 +199,30 @@ func _build_move_boost() -> void:
 	_move_panel.visible = false
 
 
+## Панель ответа защитника на объявленную атаку (ADR-015): «Броня +1» или пропустить.
+func _build_defend() -> void:
+	_defend_panel = PanelContainer.new()
+	_defend_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_defend_panel.add_theme_stylebox_override("panel", _panel_style(Color(0.12, 0.05, 0.07, 0.96)))
+	add_child(_defend_panel)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 6)
+	_defend_panel.add_child(column)
+
+	var title := Label.new()
+	title.text = "Защитник: ответ биомассой"
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", COLOR_ACCENT)
+	column.add_child(title)
+
+	var armor := _boost_button(column, "−1 биомасса: броня +1")
+	armor.pressed.connect(func(): grid.choose_defense(true))
+	var skip := _boost_button(column, "пропустить")
+	skip.pressed.connect(func(): grid.choose_defense(false))
+	_defend_panel.visible = false
+
+
 func _build_tooltip() -> void:
 	_tooltip = PanelContainer.new()
 	_tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -281,6 +305,7 @@ func _on_selected_changed(unit: Unit) -> void:
 	selected = unit
 	_boost_panel.visible = false
 	_move_panel.visible = false
+	_defend_panel.visible = false
 	_refresh_plaque(unit)
 	_refresh_stats_display()
 
@@ -299,9 +324,25 @@ func _on_tile_hovered_changed(coord: Vector2i, has_hover: bool) -> void:
 
 
 func _on_action_changed(mode: String) -> void:
+	_defend_panel.visible = false
 	if selected != null:
 		_update_buttons(selected)
 	_update_boost_visibility(mode)
+
+
+func _on_defense_requested(unit: Unit) -> void:
+	_defend_panel.visible = true
+	_position_defend_panel(unit)
+
+
+func _position_defend_panel(unit: Unit) -> void:
+	var pos := grid.figure_screen_pos(unit)
+	var view := get_viewport_rect().size
+	_defend_panel.reset_size()
+	var size: Vector2 = _defend_panel.size
+	_defend_panel.position = Vector2(
+		clampf(pos.x + grid.hex_size + 12.0, 8.0, maxf(8.0, view.x - size.x - 8.0)),
+		clampf(pos.y - size.y * 0.5, 8.0, maxf(8.0, view.y - size.y - 8.0)))
 
 
 func _is_infected() -> bool:
@@ -361,8 +402,6 @@ func _update_buttons(unit: Unit) -> void:
 	var has_action := grid.game.has_action(unit)
 	_btn_action.visible = has_action
 	_btn_action.disabled = unit.attacked or unit.acted
-	# Усиление брони — только заражённым.
-	_btn_armor.visible = _is_infected()
 
 
 # --- Строка характеристик ----------------------------------------------------

@@ -71,6 +71,9 @@ var essence: Dictionary = {}
 var graveyard: Array[Unit] = []
 ## Призываемые фигуры: player -> {unit_id: Dictionary (данные фракционного листа)}.
 var summon_defs: Dictionary = {}
+## Отложенная атака (двухфазный бой, ADR-015): объявление → (ответ защитника) → бросок.
+## Ключи: attacker, defender, extra_damage, min_attack. Пусто — атаки не объявлено.
+var pending_attack: Dictionary = {}
 
 
 func setup(board_: Board, dice_: Dice = null) -> void:
@@ -88,6 +91,7 @@ func setup(board_: Board, dice_: Dice = null) -> void:
 	essence.clear()
 	graveyard.clear()
 	summon_defs.clear()
+	pending_attack.clear()
 	winner = 0
 	begin_turn()
 
@@ -360,6 +364,85 @@ func attack_with_surge(attacker: Unit, defender: Unit) -> Dictionary:
 	return _strike(attacker, defender, 0, 3)
 
 
+# --- Двухфазная атака (ADR-015): броня биомассой в ответ -----------------------
+
+## Первая фаза — объявление атаки. Проверяет ход/дальность, списывает ресурсы
+## атакующего (биомасса за урон/дальность, эссенция за всплеск) и помечает
+## «атаковал». Сам бросок откладывается до resolve_attack, чтобы защитник успел
+## ответить биомассой (+1 броня). needs_defense=true — защитнику нужна пауза.
+func declare_attack(attacker: Unit, defender: Unit,
+		damage_up: bool = false, range_up: bool = false, surge: bool = false) -> Dictionary:
+	if not pending_attack.is_empty():
+		return {"ok": false, "reason": "уже объявлена атака — сперва бросок", "needs_defense": false}
+	var extra_range := 1 if range_up else 0
+	var verdict := can_attack(attacker, defender, extra_range)
+	if not verdict["ok"]:
+		return {"ok": false, "reason": verdict["reason"], "needs_defense": false}
+	var cost := (BIOMASS_DAMAGE_COST if damage_up else 0) + (BIOMASS_RANGE_COST if range_up else 0)
+	if surge and essence_of(attacker.owner) < 1:
+		return {"ok": false, "reason": "не хватает эссенции для всплеска", "needs_defense": false}
+	if cost > 0 and biomass_of(attacker.owner) < cost:
+		return {"ok": false,
+			"reason": "не хватает биомассы: нужно %d, есть %d" % [cost, biomass_of(attacker.owner)],
+			"needs_defense": false}
+	if cost > 0:
+		spend_biomass(attacker.owner, cost)
+	if surge:
+		spend_essence(attacker.owner, 1)
+	attacker.attacked = true
+	pending_attack = {
+		"attacker": attacker,
+		"defender": defender,
+		"extra_damage": 1 if damage_up else 0,
+		"min_attack": 3 if surge else 1,
+	}
+	return {"ok": true, "needs_defense": can_defend_with_biomass(defender), "reason": ""}
+
+
+## Защитник отложенной атаки (или null, если атака не объявлена).
+func pending_defender() -> Unit:
+	if pending_attack.is_empty():
+		return null
+	return pending_attack["defender"] as Unit
+
+
+## Может ли защитник отложенной атаки ответить биомассой: +1 броня к этой защите.
+## Только заражённый (фракция infected) с биомассой, максимум +1 за защиту.
+func can_defend_with_biomass(defender: Unit) -> bool:
+	if pending_attack.is_empty() or pending_attack["defender"] != defender:
+		return false
+	if str(factions.get(defender.owner, "")) != "infected":
+		return false
+	if biomass_of(defender.owner) < BIOMASS_ARMOR_COST:
+		return false
+	if defender.armor_boost > 0:
+		return false
+	return true
+
+
+## Защитник тратит 1 биомассу на +1 броню к этой защите (только в ответ на атаку).
+func defend_with_biomass(defender: Unit) -> Dictionary:
+	if not can_defend_with_biomass(defender):
+		return {"ok": false, "reason": "усиление брони недоступно"}
+	spend_biomass(defender.owner, BIOMASS_ARMOR_COST)
+	defender.armor_boost += 1
+	return {"ok": true, "reason": "броня +1 к этой защите (биомассы %d)" % biomass_of(defender.owner)}
+
+
+## Вторая фаза: выполнить отложенный бросок. Если защитник ответил биомассой,
+## его +1 броня уже в defender.armor_boost и войдёт в защиту.
+func resolve_attack() -> Dictionary:
+	if pending_attack.is_empty():
+		return {"hit": false, "damage": 0, "defense": 0, "killed": false,
+			"wounded": false, "coin": "", "reason": "нет объявленной атаки"}
+	var attacker: Unit = pending_attack["attacker"]
+	var defender: Unit = pending_attack["defender"]
+	var extra_damage: int = pending_attack["extra_damage"]
+	var min_attack: int = pending_attack["min_attack"]
+	pending_attack.clear()
+	return _strike(attacker, defender, extra_damage, min_attack)
+
+
 ## Сам бросок боя, без проверки хода и без расхода атаки: общий путь для
 ## обычной атаки и для реакции укрепления (ADR-002).
 func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0, min_attack: int = 1) -> Dictionary:
@@ -443,16 +526,6 @@ func spend_biomass(player: int, amount: int) -> bool:
 func can_empower_attack(player: int, damage_up: bool, range_up: bool) -> bool:
 	var cost := (BIOMASS_DAMAGE_COST if damage_up else 0) + (BIOMASS_RANGE_COST if range_up else 0)
 	return biomass_of(player) >= cost
-
-
-## Усиление брони биомассой: 1 биомасса = +1 к следующей защите этой фигуры.
-func boost_armor(unit: Unit) -> Dictionary:
-	if biomass_of(unit.owner) < BIOMASS_ARMOR_COST:
-		return {"ok": false,
-			"reason": "не хватает биомассы: нужно %d, есть %d" % [BIOMASS_ARMOR_COST, biomass_of(unit.owner)]}
-	spend_biomass(unit.owner, BIOMASS_ARMOR_COST)
-	unit.armor_boost += 1
-	return {"ok": true, "reason": "броня +1 к следующей защите (биомассы %d)" % biomass_of(unit.owner)}
 
 
 # --- Эссенция нежити ----------------------------------------------------------
@@ -803,6 +876,7 @@ func begin_turn() -> void:
 
 
 func end_turn() -> void:
+	pending_attack.clear()
 	current_player = 3 - current_player
 	if current_player == 1:
 		turn_number += 1

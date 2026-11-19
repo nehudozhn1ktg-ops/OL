@@ -8,6 +8,8 @@ signal unit_selected_changed(unit: Unit)
 signal unit_hovered_changed(unit: Unit)
 signal action_changed(mode: String)
 signal tile_hovered_changed(coord: Vector2i, has_hover: bool)
+## Объявлена атака, и защитник может ответить биомассой (+1 броня) — пауза.
+signal defense_requested(unit: Unit)
 
 const SQRT3 := 1.7320508075688772
 const MAP_PATH := "res://assets/maps/data/1x1x1.json"
@@ -57,6 +59,8 @@ var attack_boost: Dictionary = {"damage": false, "range": false}
 var move_boost: int = 0
 ## Кто за какую фракцию играет: player -> id фракции.
 var faction_ids: Dictionary = {}
+## Открыта пауза «защитник может ответить биомассой» после объявления атаки.
+var pending_defense: bool = false
 
 
 func _ready() -> void:
@@ -323,13 +327,28 @@ func set_move_boost(extra: int) -> void:
 	queue_redraw()
 
 
-## Усиление брони выбранной фигуры биомассой (1 = +1 к следующей защите).
-func boost_selected_armor() -> void:
-	if selected_unit == null:
+## Ответ защитника на отложенную атаку: усилить броню биомассой или пропустить,
+## затем выполнить бросок.
+func choose_defense(boost: bool) -> void:
+	if not pending_defense:
 		return
-	var verdict := game.boost_armor(selected_unit)
-	status.emit(verdict["reason"])
-	queue_redraw()
+	var defender := game.pending_defender()
+	if boost and defender != null:
+		var verdict := game.defend_with_biomass(defender)
+		if not verdict["ok"]:
+			status.emit(verdict["reason"])
+			return
+	pending_defense = false
+	_finish_attack()
+
+
+## Выполнить отложенный бросок и показать итог.
+func _finish_attack() -> void:
+	var blow := game.resolve_attack()
+	var text := "Атака: урон %d против защиты %d. %s" % [
+		blow["damage"], blow["defense"], blow["reason"]]
+	_clear_selection()
+	status.emit(text)
 
 
 func _click(coord: Vector2i) -> void:
@@ -342,15 +361,22 @@ func _click(coord: Vector2i) -> void:
 		return
 
 	if selected_unit != null and clicked != null and action_mode == "attack" and attack_targets.has(clicked):
-		var blow := game.attack_with_biomass(selected_unit, clicked,
+		var decl := game.declare_attack(selected_unit, clicked,
 			bool(attack_boost.get("damage", false)), bool(attack_boost.get("range", false)))
-		if blow["reason"] != "" and blow["damage"] == 0:
-			status.emit(blow["reason"])
+		if not decl["ok"]:
+			status.emit(decl["reason"])
 			return
-		var text := "Атака: урон %d против защиты %d. %s" % [
-			blow["damage"], blow["defense"], blow["reason"]]
-		_clear_selection()
-		status.emit(text)
+		if decl["needs_defense"]:
+			pending_defense = true
+			action_mode = ""
+			attack_targets.clear()
+			legal_cells.clear()
+			action_changed.emit("")
+			status.emit("Атака объявлена. Защитник: «Броня +1» за биомассу или пропустить.")
+			defense_requested.emit(clicked)
+			queue_redraw()
+			return
+		_finish_attack()
 		return
 
 	if selected_unit != null and game.has_flag(coord) and game.flag_owner(coord) != game.current_player:
@@ -398,6 +424,7 @@ func _clear_selection() -> void:
 	action_mode = ""
 	attack_boost = {"damage": false, "range": false}
 	move_boost = 0
+	pending_defense = false
 	legal_cells.clear()
 	attack_targets.clear()
 	queue_redraw()
