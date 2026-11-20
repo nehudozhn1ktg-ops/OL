@@ -658,11 +658,45 @@ func resolve_attack() -> Dictionary:
 	return _strike(attacker, defender, extra_damage, min_attack)
 
 
+## Ледяное копьё Льда (патч 7): действие, наносит 4 урона (плюс бонусы).
+func can_ice_lance(unit: Unit, defender: Unit) -> Dictionary:
+	if not unit.abilities.has("ice_lance"):
+		return {"ok": false, "reason": "ледяное копьё доступно только Льду"}
+	var verdict := can_act(unit)
+	if not verdict["ok"]:
+		return verdict
+	if defender == null or not units.has(defender):
+		return {"ok": false, "reason": "нет цели"}
+	if defender.owner == unit.owner:
+		return {"ok": false, "reason": "своих не атакуют"}
+	var dist: int = board.distance(unit.coord, defender.coord)
+	if dist < 1 or dist > attack_range(unit):
+		return {"ok": false, "reason": "цель дальше дальности атаки (%d)" % attack_range(unit)}
+	return {"ok": true, "reason": ""}
+
+
+func ice_lance(unit: Unit, defender: Unit) -> Dictionary:
+	var verdict := can_ice_lance(unit, defender)
+	if not verdict["ok"]:
+		return {"hit": false, "damage": 0, "defense": 0, "killed": false,
+			"wounded": false, "coin": "", "reason": verdict["reason"]}
+	unit.acted = true
+	return _strike(unit, defender, 0, 1, 4)
+
+
 ## Сам бросок боя, без проверки хода и без расхода атаки: общий путь для
 ## обычной атаки и для реакции укрепления (ADR-002).
-func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0, min_attack: int = 1) -> Dictionary:
+func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0, min_attack: int = 1, fixed_damage: int = 0) -> Dictionary:
 	var shot_distance: int = board.distance(attacker.coord, defender.coord)
-	var damage: int = dice.d4(min_attack) + attack_bonus(attacker) + extra_damage
+	var damage: int
+	if fixed_damage > 0:
+		damage = fixed_damage + attack_bonus(attacker) + extra_damage
+	elif defender.abilities.has("boiling_aura"):
+		var d1: int = dice.d4(min_attack)
+		var d2: int = dice.d4(min_attack)
+		damage = mini(d1, d2) + attack_bonus(attacker) + extra_damage
+	else:
+		damage = dice.d4(min_attack) + attack_bonus(attacker) + extra_damage
 	var shield_bonus: int = 2 if defender.shield else 0
 	var defense: int = dice.d4() + defense_bonus(defender, shot_distance) + defender.armor_boost + shield_bonus
 	defender.armor_boost = 0  # усиление брони — на одну защиту
@@ -1013,7 +1047,7 @@ func _gain_kill_resource(player: int) -> void:
 ## Есть ли у фигуры особое действие. Пока — заклинание Некроманта (cast_spell),
 ## дальше сюда добавятся действия других фигур.
 func has_action(unit: Unit) -> bool:
-	return unit.abilities.has("cast_spell") or unit.abilities.has("heart_of_elements")
+	return unit.abilities.has("cast_spell") or unit.abilities.has("heart_of_elements") or unit.abilities.has("ice_lance")
 
 
 ## Общая проверка «фигура может действовать»: активирована, ход её игрока,
