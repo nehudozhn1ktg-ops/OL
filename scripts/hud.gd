@@ -43,6 +43,7 @@ var _boost_panel: PanelContainer
 var _move_panel: PanelContainer
 ## Панель ответа защитника: «Броня +1» за биомассу или пропустить (ADR-015).
 var _defend_panel: PanelContainer
+var _btn_end: Button
 ## Подсказка ходит за курсором; на снимке её ставят в заданную точку.
 var _follow_mouse: bool = true
 
@@ -56,6 +57,7 @@ func _ready() -> void:
 	_build_move_boost()
 	_build_defend()
 	_build_tooltip()
+	_build_end_turn()
 	_refresh_resource()
 
 
@@ -244,6 +246,33 @@ func _build_tooltip() -> void:
 	_lbl_tooltip.add_theme_color_override("font_color", COLOR_TEXT)
 	margin.add_child(_lbl_tooltip)
 	_tooltip.visible = false
+
+
+## Кнопка «Конец хода» — правый верхний угол: на мобильных пробела нет.
+func _build_end_turn() -> void:
+	_btn_end = Button.new()
+	_btn_end.text = "Конец хода"
+	_btn_end.add_theme_font_size_override("font_size", 18)
+	_btn_end.add_theme_color_override("font_color", COLOR_TEXT)
+	_btn_end.add_theme_stylebox_override("normal", _panel_style(Color("#1b2230")))
+	_btn_end.add_theme_stylebox_override("hover", _panel_style(Color("#26344a")))
+	_btn_end.add_theme_stylebox_override("pressed", _panel_style(Color("#2f4258")))
+	_btn_end.mouse_filter = Control.MOUSE_FILTER_STOP
+	_btn_end.anchor_left = 1.0
+	_btn_end.anchor_right = 1.0
+	_btn_end.anchor_top = 0.0
+	_btn_end.anchor_bottom = 0.0
+	_btn_end.offset_left = -150.0
+	_btn_end.offset_right = -12.0
+	_btn_end.offset_top = 12.0
+	_btn_end.offset_bottom = 52.0
+	_btn_end.pressed.connect(_on_end_turn)
+	add_child(_btn_end)
+
+
+func _on_end_turn() -> void:
+	if grid != null:
+		grid.end_turn()
 
 
 func _panel_style(color: Color = Color(0.06, 0.07, 0.09, 0.88)) -> StyleBoxFlat:

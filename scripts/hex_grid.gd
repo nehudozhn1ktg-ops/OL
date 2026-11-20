@@ -518,6 +518,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_clear_selection()
 			status.emit("Выбор снят")
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_SPACE:
-		game.end_turn()
-		_clear_selection()
-		status.emit("Ход передан игроку %d (раунд %d)" % [game.current_player, game.round_number])
+		end_turn()
+
+
+## Передать ход: пробел или кнопка «Конец хода» в HUD (на мобильных пробела нет).
+func end_turn() -> void:
+	game.end_turn()
+	_clear_selection()
+	status.emit("Ход передан игроку %d (раунд %d)" % [game.current_player, game.round_number])
