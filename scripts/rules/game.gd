@@ -46,6 +46,8 @@ var board: Board
 var dice: Dice
 var units: Array[Unit] = []
 var current_player: int = 1
+## Число игроков в партии (2 — дуэль, 4 — FFA). Задаётся в setup().
+var player_count: int = 2
 var turn_number: int = 1
 var round_number: int = 1
 var is_day: bool = true
@@ -76,9 +78,10 @@ var summon_defs: Dictionary = {}
 var pending_attack: Dictionary = {}
 
 
-func setup(board_: Board, dice_: Dice = null) -> void:
+func setup(board_: Board, dice_: Dice = null, player_count_: int = 2) -> void:
 	board = board_
 	dice = dice_ if dice_ != null else Dice.new()
+	player_count = maxi(1, player_count_)
 	units.clear()
 	current_player = 1
 	turn_number = 1
@@ -877,7 +880,7 @@ func begin_turn() -> void:
 
 func end_turn() -> void:
 	pending_attack.clear()
-	current_player = 3 - current_player
+	current_player = (current_player % player_count) + 1
 	if current_player == 1:
 		turn_number += 1
 		round_number += 1

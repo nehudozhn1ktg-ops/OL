@@ -33,7 +33,7 @@ const TERRAIN_TEXTURE := {
 	5: preload("res://assets/tiles/flag.png"),
 	6: preload("res://assets/tiles/camp.png"),
 }
-const OWNER_COLOR := {1: Color("#4a7fd4"), 2: Color("#d4574a")}
+const OWNER_COLOR := {1: Color("#4a7fd4"), 2: Color("#d4574a"), 3: Color("#4a9e57"), 4: Color("#b26fd4")}
 const COLOR_BORDER := Color(0.0, 0.0, 0.0, 0.45)
 const COLOR_HOVER := Color("#f0f0f0")
 const COLOR_SELECTED := Color("#ffd447")
@@ -74,39 +74,47 @@ func _ready() -> void:
 		board.build_disk(map_radius)
 
 	game = Game.new()
-	game.setup(board)
+	game.setup(board, null, GameConfig.player_count())
 	_place_demo_units()
 	_fit_to_view()
 	queue_redraw()
 
 
-## Отряды обеих сторон из фракционных листов: по шесть фигур к своим флагам.
-## Заражённые начинают с максимумом биомассы (фракционный лист 0–6).
+## Отряды всех игроков из фракционных листов: по шесть фигур к своим флагам.
+## Флаги берутся из карты (клетки TERRAIN_FLAG) и раздаются игрокам 1..N по
+## детерминированному порядку (сортировка по q). Заражённые начинают с
+## максимумом биомассы, нежить — со стартовой эссенцией и списком призываемых.
 func _place_demo_units() -> void:
+	var players := range(1, GameConfig.player_count() + 1)
 	var rosters := {}
 	var factions_data := {}
-	for player in [1, 2]:
+	for player in players:
 		var faction := FactionData.load_file(GameConfig.path_for(player))
 		faction_ids[player] = str(faction.get("id", ""))
 		factions_data[player] = faction
 		rosters[player] = FactionData.roster(faction, 6)
-	if rosters.get(1, []).is_empty() or rosters.get(2, []).is_empty():
-		push_warning("фракция не загрузилась, ставлю заглушки")
-		game.add_unit(1, Vector2i(-2, 0), false)
-		game.add_unit(2, Vector2i(2, 0), false)
-		return
 
 	var flags: Array[Vector2i] = []
 	for coord in board.cells.keys():
 		if board.terrain_at(coord) == Board.TERRAIN_FLAG:
 			flags.append(coord)
 	flags.sort_custom(func(a, b): return a.x < b.x)
-	if flags.is_empty():
+
+	if flags.size() < players.size():
+		push_warning("на карте флагов %d меньше, чем игроков %d — ставлю заглушки" % [flags.size(), players.size()])
+		for player in players:
+			game.add_unit(player, Vector2i((player - 1) * 2 - 2, 0), false)
+		game.factions = faction_ids.duplicate()
 		return
-	game.add_flag(1, flags[0])
-	game.add_flag(2, flags[flags.size() - 1])
-	_place_team(1, flags[0], rosters[1])
-	_place_team(2, flags[flags.size() - 1], rosters[2])
+
+	for player in players:
+		if rosters.get(player, []).is_empty():
+			push_warning("фракция игрока %d не загрузилась — заглушка" % player)
+			game.add_unit(player, flags[player - 1], false)
+			continue
+		game.add_flag(player, flags[player - 1])
+		_place_team(player, flags[player - 1], rosters[player])
+
 	game.factions = faction_ids.duplicate()
 	for player in faction_ids.keys():
 		if faction_ids[player] == "infected":

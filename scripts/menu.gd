@@ -57,7 +57,7 @@ func _build() -> void:
 	column.add_child(title)
 
 	var subtitle := Label.new()
-	subtitle.text = "Партия 1 на 1: выбери сторону, соперник получит другую фракцию"
+	subtitle.text = "FFA на четверых: выбери свою фракцию, остальные игроки получат три остальные"
 	subtitle.add_theme_font_size_override("font_size", 18)
 	subtitle.add_theme_color_override("font_color", COLOR_DIM)
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -95,14 +95,13 @@ func _on_faction_pressed(faction_id: String) -> void:
 
 
 func _start(faction_id: String) -> void:
-	GameConfig.factions[1] = faction_id
-	GameConfig.factions[2] = _opponent_for(faction_id)
-	get_tree().change_scene_to_file.call_deferred("res://scenes/main.tscn")
-
-
-## Соперник — следующая фракция по кругу (демо-режим до выбора за обе стороны).
-func _opponent_for(faction_id: String) -> String:
+	# FFA на четверых: игрок 1 — выбранная фракция, игроки 2–4 — остальные по кругу.
+	var start := 0
 	for i in FACTIONS.size():
 		if FACTIONS[i]["id"] == faction_id:
-			return FACTIONS[(i + 1) % FACTIONS.size()]["id"]
-	return "undead"
+			start = i
+			break
+	GameConfig.factions.clear()
+	for i in FACTIONS.size():
+		GameConfig.factions[i + 1] = FACTIONS[(start + i) % FACTIONS.size()]["id"]
+	get_tree().change_scene_to_file.call_deferred("res://scenes/main.tscn")
