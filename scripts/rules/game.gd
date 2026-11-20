@@ -86,6 +86,8 @@ var essence_before_urn: Dictionary = {}
 var barricades: Dictionary = {}
 ## Кокон заражённых: player -> клетка кокона (возрождение первой погибшей).
 var cocoon: Dictionary = {}
+## Магический щит Эфиральда: player -> остаток щитов (0–3).
+var shield: Dictionary = {}
 ## Погибшие фигуры — для воскрешения Некромантом (ADR-012).
 var graveyard: Array[Unit] = []
 ## Призываемые фигуры: player -> {unit_id: Dictionary (данные фракционного листа)}.
@@ -118,6 +120,7 @@ func setup(board_: Board, dice_: Dice = null, player_count_: int = 2) -> void:
 	essence_before_urn.clear()
 	barricades.clear()
 	cocoon.clear()
+	shield.clear()
 	graveyard.clear()
 	summon_defs.clear()
 	fusion_defs.clear()
@@ -463,6 +466,37 @@ func fuse(unit: Unit, target: Unit) -> Dictionary:
 	return {"ok": true, "reason": "%s создано" % str(def.get("name", fusion_id))}
 
 
+## Телепортация Лавы на расстояние своего передвижения (патч 7).
+func can_teleport(unit: Unit, to: Vector2i) -> Dictionary:
+	if unit.owner != current_player:
+		return {"ok": false, "reason": "сейчас ход другого игрока"}
+	if not unit.abilities.has("lava_teleport"):
+		return {"ok": false, "reason": "телепортация доступна только Лаве"}
+	if not unit.activated:
+		return {"ok": false, "reason": "фигура не активирована"}
+	if unit.moved:
+		return {"ok": false, "reason": "фигура уже двигалась"}
+	if not board.has_cell(to):
+		return {"ok": false, "reason": "за пределами поля"}
+	if unit_at(to) != null:
+		return {"ok": false, "reason": "клетка занята"}
+	if not board.is_passable(to):
+		return {"ok": false, "reason": "клетка непроходима"}
+	var dist: int = board.distance(unit.coord, to)
+	if dist > move_value(unit):
+		return {"ok": false, "reason": "дальше, чем позволяет передвижение"}
+	return {"ok": true, "reason": ""}
+
+
+func teleport(unit: Unit, to: Vector2i) -> Dictionary:
+	var verdict := can_teleport(unit, to)
+	if not verdict["ok"]:
+		return verdict
+	unit.coord = to
+	unit.moved = true
+	return {"ok": true, "reason": "телепортация выполнена"}
+
+
 # --- Бой --------------------------------------------------------------------
 
 func can_attack(attacker: Unit, defender: Unit, extra_range: int = 0) -> Dictionary:
@@ -619,8 +653,10 @@ func resolve_attack() -> Dictionary:
 func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0, min_attack: int = 1) -> Dictionary:
 	var shot_distance: int = board.distance(attacker.coord, defender.coord)
 	var damage: int = dice.d4(min_attack) + attack_bonus(attacker) + extra_damage
-	var defense: int = dice.d4() + defense_bonus(defender, shot_distance) + defender.armor_boost
+	var shield_bonus: int = 2 if defender.shield else 0
+	var defense: int = dice.d4() + defense_bonus(defender, shot_distance) + defender.armor_boost + shield_bonus
 	defender.armor_boost = 0  # усиление брони — на одну защиту
+	defender.shield = false  # магический щит — на одну защиту
 	var result := {"hit": damage > defense, "damage": damage, "defense": defense,
 		"killed": false, "wounded": false, "coin": "", "reason": ""}
 	if not result["hit"]:
@@ -924,6 +960,33 @@ func attack_cocoon(attacker: Unit, coord: Vector2i) -> Dictionary:
 			cocoon.erase(player)
 			break
 	return {"destroyed": true, "reason": "кокон разрушен"}
+
+
+# --- Магический щит Эфиральда ------------------------------------------------
+
+func start_shield(player: int) -> void:
+	shield[player] = 3
+
+
+func shield_of(player: int) -> int:
+	return int(shield.get(player, 0))
+
+
+func spend_shield(player: int) -> bool:
+	if shield_of(player) < 1:
+		return false
+	shield[player] = shield_of(player) - 1
+	return true
+
+
+func use_shield(player: int, unit: Unit) -> Dictionary:
+	if shield_of(player) < 1:
+		return {"ok": false, "reason": "нет магических щитов"}
+	if unit.shield:
+		return {"ok": false, "reason": "щит уже поднят на этой фигуре"}
+	spend_shield(player)
+	unit.shield = true
+	return {"ok": true, "reason": "щит поднят (+2 к броне для следующей защиты)"}
 
 
 ## +ресурс за уничтоженного противника — по фракции убийцы.

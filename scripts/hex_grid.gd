@@ -152,6 +152,7 @@ func _place_demo_units() -> void:
 		elif faction_ids[player] == "people":
 			game.start_barricades(player)
 		elif faction_ids[player] == "elemental":
+			game.start_shield(player)
 			game.register_fusions(player, FactionData.fusions(FactionData.load_file("res://data/factions/elemental.json")))
 
 
