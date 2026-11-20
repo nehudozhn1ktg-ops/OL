@@ -84,6 +84,8 @@ var urn_active: Dictionary = {}
 var essence_before_urn: Dictionary = {}
 ## Баррикады людей: player -> остаток фишек (0–4).
 var barricades: Dictionary = {}
+## Кокон заражённых: player -> клетка кокона (возрождение первой погибшей).
+var cocoon: Dictionary = {}
 ## Погибшие фигуры — для воскрешения Некромантом (ADR-012).
 var graveyard: Array[Unit] = []
 ## Призываемые фигуры: player -> {unit_id: Dictionary (данные фракционного листа)}.
@@ -113,6 +115,7 @@ func setup(board_: Board, dice_: Dice = null, player_count_: int = 2) -> void:
 	urn_active.clear()
 	essence_before_urn.clear()
 	barricades.clear()
+	cocoon.clear()
 	graveyard.clear()
 	summon_defs.clear()
 	pending_attack.clear()
@@ -546,34 +549,51 @@ func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0, min_attack: 
 
 	var owner_id := attacker.owner
 	if defender.no_wound:
-		result["killed"] = true
 		result["reason"] = "призванная фигура не имеет механики ранения — погибает"
-		_remove(defender)
-		_add_score(owner_id, 1)
-		_gain_kill_resource(owner_id)
+		_kill_or_reborn(defender, owner_id, result)
 		return result
 
 	if defender.wounded:
-		result["killed"] = true
 		result["reason"] = "рана повторно — фигура покидает поле"
-		_remove(defender)
-		_add_score(owner_id, 1)
-		_gain_kill_resource(owner_id)
+		_kill_or_reborn(defender, owner_id, result)
 		return result
 
 	var coin: String = dice.coin()
 	result["coin"] = coin
 	if coin == "black":
-		result["killed"] = true
 		result["reason"] = "чёрная сторона монеты — фигура погибает"
-		_remove(defender)
-		_add_score(owner_id, 1)
-		_gain_kill_resource(owner_id)
+		_kill_or_reborn(defender, owner_id, result)
 	else:
 		defender.wounded = true
 		result["wounded"] = true
 		result["reason"] = "белая сторона монеты — фигура ранена"
 	return result
+
+
+## Возрождение из кокона: если стоит — фигура переносится на его место живой.
+func _reborn_from_cocoon(unit: Unit) -> bool:
+	if not cocoon.has(unit.owner):
+		return false
+	var cell: Vector2i = cocoon[unit.owner]
+	cocoon.erase(unit.owner)
+	unit.coord = cell
+	unit.wounded = false
+	unit.no_wound = false
+	unit.armor_boost = 0
+	return true
+
+
+## Гибель с проверкой кокона: возрождение (без очков) или удаление (очки + ресурс).
+func _kill_or_reborn(defender: Unit, owner_id: int, result: Dictionary) -> void:
+	if _reborn_from_cocoon(defender):
+		result["killed"] = false
+		result["reborn"] = true
+		result["reason"] = "фигура возродилась из кокона"
+		return
+	result["killed"] = true
+	_remove(defender)
+	_add_score(owner_id, 1)
+	_gain_kill_resource(owner_id)
 
 
 func _remove(unit: Unit) -> void:
@@ -760,6 +780,71 @@ func attack_barricade(attacker: Unit, coord: Vector2i) -> Dictionary:
 	attacker.attacked = true
 	board.set_terrain(coord, Board.TERRAIN_GRASS)
 	return {"destroyed": true, "reason": "баррикада разрушена"}
+
+
+# --- Кокон возрождения заражённых --------------------------------------------
+
+## Поставить кокон на соседнюю незанятую клетку от своей фигуры (патч 7).
+func can_place_cocoon(player: int, coord: Vector2i) -> Dictionary:
+	if cocoon.has(player):
+		return {"ok": false, "reason": "кокон уже стоит"}
+	if not board.has_cell(coord):
+		return {"ok": false, "reason": "клетка за пределами поля"}
+	if board.is_water(coord):
+		return {"ok": false, "reason": "на воду кокон ставить нельзя"}
+	if unit_at(coord) != null:
+		return {"ok": false, "reason": "клетка занята фигурой"}
+	if cocoon.values().has(coord):
+		return {"ok": false, "reason": "клетка занята коконом"}
+	var adjacent := false
+	for unit in units_of(player):
+		if board.distance(unit.coord, coord) == 1:
+			adjacent = true
+			break
+	if not adjacent:
+		return {"ok": false, "reason": "кокон ставится только рядом со своей фигурой"}
+	return {"ok": true, "reason": ""}
+
+
+func place_cocoon(player: int, coord: Vector2i) -> Dictionary:
+	var verdict := can_place_cocoon(player, coord)
+	if not verdict["ok"]:
+		return verdict
+	cocoon[player] = coord
+	return {"ok": true, "reason": "кокон поставлен"}
+
+
+func cocoon_of(player: int) -> Vector2i:
+	return cocoon.get(player, Vector2i(-999999, -999999))
+
+
+## Кокон уничтожается атакой любой силы (без броска и очков).
+func can_attack_cocoon(attacker: Unit, coord: Vector2i) -> Dictionary:
+	if not cocoon.values().has(coord):
+		return {"ok": false, "reason": "здесь нет кокона"}
+	if attacker.owner != current_player:
+		return {"ok": false, "reason": "сейчас ход другого игрока"}
+	if not attacker.activated:
+		return {"ok": false, "reason": "фигура не активирована"}
+	if not attacker.can_attack:
+		return {"ok": false, "reason": "эта фигура не может атаковать"}
+	if attacker.attacked:
+		return {"ok": false, "reason": "эта фигура уже атаковала"}
+	if board.distance(attacker.coord, coord) != 1:
+		return {"ok": false, "reason": "атака только по соседней клетке"}
+	return {"ok": true, "reason": ""}
+
+
+func attack_cocoon(attacker: Unit, coord: Vector2i) -> Dictionary:
+	var verdict := can_attack_cocoon(attacker, coord)
+	if not verdict["ok"]:
+		return {"destroyed": false, "reason": verdict["reason"]}
+	attacker.attacked = true
+	for player in cocoon.keys():
+		if cocoon[player] == coord:
+			cocoon.erase(player)
+			break
+	return {"destroyed": true, "reason": "кокон разрушен"}
 
 
 ## +ресурс за уничтоженного противника — по фракции убийцы.
