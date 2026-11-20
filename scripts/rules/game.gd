@@ -723,14 +723,24 @@ func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0, min_attack: 
 	var damage: int
 	if fixed_damage > 0:
 		damage = fixed_damage + attack_bonus(attacker) + extra_damage
-	elif defender.abilities.has("boiling_aura"):
-		var d1: int = dice.d4(min_attack)
-		var d2: int = dice.d4(min_attack)
-		damage = mini(d1, d2) + attack_bonus(attacker) + extra_damage
 	else:
-		damage = dice.d4(min_attack) + attack_bonus(attacker) + extra_damage
+		var raw: int
+		if defender.abilities.has("boiling_aura"):
+			var d1: int = dice.d4(min_attack)
+			var d2: int = dice.d4(min_attack)
+			raw = mini(d1, d2)
+		else:
+			raw = dice.d4(min_attack)
+		if attacker.abilities.has("crystal_gamble") and raw % 2 == 0:
+			raw += 2
+		if attacker.abilities.has("black_flame") and board.terrain_at(defender.coord) == Board.TERRAIN_FOREST:
+			raw += 1
+		damage = raw + attack_bonus(attacker) + extra_damage
 	var shield_bonus: int = 2 if defender.shield else 0
-	var defense: int = dice.d4() + defense_bonus(defender, shot_distance) + defender.armor_boost + shield_bonus
+	var raw_def: int = dice.d4()
+	if defender.abilities.has("crystal_gamble") and raw_def % 2 == 0:
+		raw_def += 2
+	var defense: int = raw_def + defense_bonus(defender, shot_distance) + defender.armor_boost + shield_bonus
 	defender.armor_boost = 0  # усиление брони — на одну защиту
 	defender.shield = false  # магический щит — на одну защиту
 	var result := {"hit": damage > defense, "damage": damage, "defense": defense,
@@ -740,20 +750,29 @@ func _strike(attacker: Unit, defender: Unit, extra_damage: int = 0, min_attack: 
 
 	var owner_id := attacker.owner
 	if defender.no_wound:
+		var expl_cell := defender.coord
 		result["reason"] = "призванная фигура не имеет механики ранения — погибает"
 		_kill_or_reborn(defender, owner_id, result)
+		if result["killed"] and attacker.abilities.has("explosion"):
+			_explode_at(expl_cell, attacker)
 		return result
 
 	if defender.wounded:
+		var expl_cell := defender.coord
 		result["reason"] = "рана повторно — фигура покидает поле"
 		_kill_or_reborn(defender, owner_id, result)
+		if result["killed"] and attacker.abilities.has("explosion"):
+			_explode_at(expl_cell, attacker)
 		return result
 
 	var coin: String = dice.coin()
 	result["coin"] = coin
 	if coin == "black":
+		var expl_cell := defender.coord
 		result["reason"] = "чёрная сторона монеты — фигура погибает"
 		_kill_or_reborn(defender, owner_id, result)
+		if result["killed"] and attacker.abilities.has("explosion"):
+			_explode_at(expl_cell, attacker)
 	else:
 		defender.wounded = true
 		result["wounded"] = true
@@ -772,6 +791,21 @@ func _reborn_from_cocoon(unit: Unit) -> bool:
 	unit.no_wound = false
 	unit.armor_boost = 0
 	return true
+
+
+## Взрыв (слияние Взрыв): при убийстве — ранит соседей цели.
+func _explode_at(coord: Vector2i, attacker: Unit) -> void:
+	var victims: Array = []
+	for u in units:
+		if u.owner != attacker.owner and board.distance(coord, u.coord) == 1:
+			victims.append(u)
+	for u in victims:
+		if u.wounded:
+			_remove(u)
+			_add_score(attacker.owner, 1)
+			_gain_kill_resource(attacker.owner)
+		else:
+			u.wounded = true
 
 
 ## Гибель с проверкой кокона: возрождение (без очков) или удаление (очки + ресурс).
