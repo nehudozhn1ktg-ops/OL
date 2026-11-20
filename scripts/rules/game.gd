@@ -319,6 +319,70 @@ func swap(unit: Unit, target: Unit) -> Dictionary:
 	return {"ok": true, "reason": "обмен выполнен (осталось %d передвижения)" % unit.mp_left}
 
 
+# --- Рокировка (люди, патч 7) ------------------------------------------------
+
+## Активная рокировка: активированная фигура меняется местами с соседней своей.
+## Раз за ход фигуры, не заменяет атаку/передвижение, доступна только людям.
+func can_castle(unit: Unit, target: Unit) -> Dictionary:
+	if unit.owner != current_player:
+		return {"ok": false, "reason": "сейчас ход другого игрока"}
+	if str(factions.get(unit.owner, "")) != "people":
+		return {"ok": false, "reason": "рокировка доступна только Ордену креста"}
+	if not unit.activated:
+		return {"ok": false, "reason": "фигура не активирована"}
+	if unit.castled:
+		return {"ok": false, "reason": "эта фигура уже рокировалась в этот ход"}
+	if target == null or not units.has(target):
+		return {"ok": false, "reason": "нет такой фигуры"}
+	if target == unit:
+		return {"ok": false, "reason": "нельзя меняться с собой"}
+	if target.owner != unit.owner:
+		return {"ok": false, "reason": "рокировка только со своей фигурой"}
+	if board.distance(unit.coord, target.coord) != 1:
+		return {"ok": false, "reason": "рокировка только с соседней фигурой"}
+	return {"ok": true, "reason": ""}
+
+
+func castle(unit: Unit, target: Unit) -> Dictionary:
+	var verdict := can_castle(unit, target)
+	if not verdict["ok"]:
+		return verdict
+	var a := unit.coord
+	unit.coord = target.coord
+	target.coord = a
+	unit.castled = true
+	return {"ok": true, "reason": "рокировка выполнена"}
+
+
+## Защитная рокировка: можно ли атакуемую фигуру поменять местами с соседней своей
+## до броска (атака перенаправится).
+func can_castle_defense(defender: Unit) -> bool:
+	if pending_attack.is_empty() or pending_attack["defender"] != defender:
+		return false
+	if str(factions.get(defender.owner, "")) != "people":
+		return false
+	for unit in units:
+		if unit.owner != defender.owner or unit == defender:
+			continue
+		if board.distance(unit.coord, defender.coord) == 1:
+			return true
+	return false
+
+
+func castle_defense(defender: Unit, target: Unit) -> Dictionary:
+	if not can_castle_defense(defender):
+		return {"ok": false, "reason": "защитная рокировка недоступна"}
+	if target == null or target == defender or target.owner != defender.owner:
+		return {"ok": false, "reason": "неверная цель рокировки"}
+	if board.distance(target.coord, defender.coord) != 1:
+		return {"ok": false, "reason": "рокировка только с соседней фигурой"}
+	var a := defender.coord
+	defender.coord = target.coord
+	target.coord = a
+	pending_attack["defender"] = target
+	return {"ok": true, "reason": "защитная рокировка: атака перенаправлена"}
+
+
 # --- Бой --------------------------------------------------------------------
 
 func can_attack(attacker: Unit, defender: Unit, extra_range: int = 0) -> Dictionary:
@@ -421,7 +485,7 @@ func declare_attack(attacker: Unit, defender: Unit,
 		"extra_damage": 1 if damage_up else 0,
 		"min_attack": 3 if surge else 1,
 	}
-	return {"ok": true, "needs_defense": can_defend_with_biomass(defender), "reason": ""}
+	return {"ok": true, "needs_defense": can_defend_with_biomass(defender) or can_castle_defense(defender), "reason": ""}
 
 
 ## Защитник отложенной атаки (или null, если атака не объявлена).

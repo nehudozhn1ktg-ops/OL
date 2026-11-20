@@ -33,6 +33,8 @@ var no_wound: bool = false
 var activated: bool = false
 var moved: bool = false
 var attacked: bool = false
+## Рокировка (люди): фигура уже рокировалась в этот ход (раз за ход).
+var castled: bool = false
 
 
 func _init(owner_id: int, at: Vector2i, can_walk_water: bool = false) -> void:
@@ -85,4 +87,5 @@ func reset_turn_state() -> void:
 	moved = false
 	attacked = false
 	acted = false
+	castled = false
 	mp_left = move
