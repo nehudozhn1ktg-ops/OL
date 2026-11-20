@@ -70,7 +70,8 @@ static func from_data(owner_id: int, at: Vector2i, data: Dictionary) -> Unit:
 
 
 func traits() -> Dictionary:
-	return {"water_walk": water_walk or abilities.has("air_phase")}
+	var ww: bool = water_walk or abilities.has("air_phase") or abilities.has("storm")
+	return {"water_walk": ww}
 
 
 func is_king() -> bool:

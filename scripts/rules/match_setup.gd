@@ -42,4 +42,6 @@ static func place(game: Game, board: Board, factions: Dictionary) -> Dictionary:
 			game.start_energy(player)
 		elif faction_ids[player] == "people":
 			game.start_barricades(player)
+		elif faction_ids[player] == "elemental":
+			game.register_fusions(player, FactionData.fusions(FactionData.load_file("res://data/factions/elemental.json")))
 	return faction_ids

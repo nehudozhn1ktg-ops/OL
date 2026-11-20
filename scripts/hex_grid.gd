@@ -151,6 +151,8 @@ func _place_demo_units() -> void:
 			game.start_energy(player)
 		elif faction_ids[player] == "people":
 			game.start_barricades(player)
+		elif faction_ids[player] == "elemental":
+			game.register_fusions(player, FactionData.fusions(FactionData.load_file("res://data/factions/elemental.json")))
 
 
 func _place_team(player: int, anchor: Vector2i, roster: Array) -> void:

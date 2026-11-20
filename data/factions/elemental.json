@@ -154,7 +154,7 @@
       "summonable": true,
       "fusion": true,
       "elements": ["el_water", "el_earth"],
-      "abilities": ["tree_bark"],
+      "abilities": ["tree_bark", "earth_armor_bonus"],
       "text": "+1 к броне. Любая клетка травы для этой фигуры считается лесом."
     },
     {
@@ -199,7 +199,7 @@
       "summonable": true,
       "fusion": true,
       "elements": ["el_water", "el_air"],
-      "abilities": ["ice_lance"],
+      "abilities": ["ice_lance", "bolt_range_bonus"],
       "text": "+1 к дальности атаки; ледяное копьё наносит 4 урона."
     },
     {
@@ -229,7 +229,7 @@
       "summonable": true,
       "fusion": true,
       "elements": ["el_fire", "el_bolt"],
-      "abilities": ["black_flame"],
+      "abilities": ["black_flame", "bolt_range_bonus"],
       "text": "+1 к дальности атаки. Можно бить дальней атакой по лесу; +1 к урону по лесу."
     },
     {
@@ -244,7 +244,7 @@
       "summonable": true,
       "fusion": true,
       "elements": ["el_bolt", "el_water"],
-      "abilities": ["storm"],
+      "abilities": ["storm", "water_move_bonus"],
       "text": "+1 к передвижению. Может передвигаться по воде."
     }
   ]

@@ -480,6 +480,8 @@ func can_attack(attacker: Unit, defender: Unit, extra_range: int = 0) -> Diction
 		return {"ok": false, "reason": "своих не атакуют"}
 	var reach: int = attack_range(attacker) + extra_range
 	var dist: int = board.distance(attacker.coord, defender.coord)
+	if dist > 1 and defender.abilities.has("heat_shield"):
+		return {"ok": false, "reason": "цель невосприимчива к дальним атакам"}
 	if dist < 1 or dist > reach:
 		return {"ok": false, "reason": "цель дальше дальности атаки (%d)" % reach}
 	return {"ok": true, "reason": ""}
