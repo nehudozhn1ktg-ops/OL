@@ -36,6 +36,6 @@ if not os.path.isdir(ROOT):
     sys.stderr.write(f"Нет папки сборки: {ROOT}\nСначала выполните экспорт.\n")
     sys.exit(1)
 
-print(f"Serving {ROOT} on http://127.0.0.1:{PORT}/", flush=True)
-with socketserver.TCPServer(("127.0.0.1", PORT), Handler) as httpd:
+print(f"Serving {ROOT} on http://0.0.0.0:{PORT}/  (локально: http://127.0.0.1:{PORT}/)", flush=True)
+with socketserver.TCPServer(("0.0.0.0", PORT), Handler) as httpd:
     httpd.serve_forever()
