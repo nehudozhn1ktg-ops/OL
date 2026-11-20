@@ -185,7 +185,7 @@ func aura_defense_bonus(unit: Unit) -> int:
 
 func defense_bonus(unit: Unit, distance: int = 1) -> int:
 	var bonus: int = unit.armor + terrain_defense_bonus(unit, distance) + aura_defense_bonus(unit)
-	if unit.abilities.has("earth_armor_bonus"):
+	if unit.abilities.has("earth_armor_bonus") or _has_elemental_ability(unit, "earth_armor_bonus"):
 		bonus += 1
 	return bonus
 
@@ -193,14 +193,14 @@ func defense_bonus(unit: Unit, distance: int = 1) -> int:
 ## Дальность атаки фигуры в клетках (1 — только соседняя).
 func attack_range(unit: Unit) -> int:
 	var r: int = maxi(1, unit.range)
-	if unit.abilities.has("bolt_range_bonus"):
+	if unit.abilities.has("bolt_range_bonus") or _has_elemental_ability(unit, "bolt_range_bonus"):
 		r += 1
 	return r
 
 
 func attack_bonus(unit: Unit) -> int:
 	var bonus: int = unit.damage
-	if unit.abilities.has("fire_damage_bonus"):
+	if unit.abilities.has("fire_damage_bonus") or _has_elemental_ability(unit, "fire_damage_bonus"):
 		bonus += 1
 	return bonus
 
@@ -208,9 +208,19 @@ func attack_bonus(unit: Unit) -> int:
 ## Пула передвижения фигуры с учётом пассивок (Вода +1).
 func move_value(unit: Unit) -> int:
 	var v: int = unit.mp_left
-	if unit.abilities.has("water_move_bonus"):
+	if unit.abilities.has("water_move_bonus") or _has_elemental_ability(unit, "water_move_bonus"):
 		v += 1
 	return v
+
+
+## Есть ли среди живых элементалей владельца такой с пассивкой (для Архимага).
+func _has_elemental_ability(unit: Unit, ability: String) -> bool:
+	if not unit.abilities.has("heart_of_elements"):
+		return false
+	for u in units:
+		if u.owner == unit.owner and u.elemental and u.abilities.has(ability):
+			return true
+	return false
 
 
 # --- Активация фигур --------------------------------------------------------
@@ -508,7 +518,7 @@ func can_attack(attacker: Unit, defender: Unit, extra_range: int = 0) -> Diction
 		return {"ok": false, "reason": "эта фигура не может атаковать"}
 	if attacker.attacked:
 		return {"ok": false, "reason": "эта фигура уже атаковала"}
-	if attacker.acted:
+	if attacker.acted and not attacker.abilities.has("heart_of_elements"):
 		return {"ok": false, "reason": "фигура уже потратила действие (атака или действие)"}
 	if attacker.owner == defender.owner:
 		return {"ok": false, "reason": "своих не атакуют"}
@@ -1003,7 +1013,7 @@ func _gain_kill_resource(player: int) -> void:
 ## Есть ли у фигуры особое действие. Пока — заклинание Некроманта (cast_spell),
 ## дальше сюда добавятся действия других фигур.
 func has_action(unit: Unit) -> bool:
-	return unit.abilities.has("cast_spell")
+	return unit.abilities.has("cast_spell") or unit.abilities.has("heart_of_elements")
 
 
 ## Общая проверка «фигура может действовать»: активирована, ход её игрока,
@@ -1015,11 +1025,55 @@ func can_act(unit: Unit) -> Dictionary:
 		return {"ok": false, "reason": "фигура не активирована: она может только двигаться"}
 	if not has_action(unit):
 		return {"ok": false, "reason": "у фигуры нет действия"}
-	if unit.attacked:
+	if unit.attacked and not unit.abilities.has("heart_of_elements"):
 		return {"ok": false, "reason": "фигура уже атаковала"}
 	if unit.acted:
 		return {"ok": false, "reason": "фигура уже действовала"}
 	return {"ok": true, "reason": ""}
+
+
+## Архимаг: возродить погибшего элементаля на соседней клетке (патч 7).
+func can_resurrect_elemental(unit: Unit, at: Vector2i) -> Dictionary:
+	if not unit.abilities.has("heart_of_elements"):
+		return {"ok": false, "reason": "действие только для Архимага"}
+	var verdict := can_act(unit)
+	if not verdict["ok"]:
+		return verdict
+	var target: Unit = null
+	for g in graveyard:
+		if g.owner == unit.owner and g.elemental:
+			target = g
+			break
+	if target == null:
+		return {"ok": false, "reason": "нет погибших элементалей"}
+	if not board.has_cell(at):
+		return {"ok": false, "reason": "клетка за пределами поля"}
+	if board.distance(unit.coord, at) != 1:
+		return {"ok": false, "reason": "возрождение только на соседнюю клетку"}
+	if not board.is_passable(at):
+		return {"ok": false, "reason": "клетка непроходима"}
+	if unit_at(at) != null:
+		return {"ok": false, "reason": "клетка занята"}
+	return {"ok": true, "reason": ""}
+
+
+func resurrect_elemental(unit: Unit, at: Vector2i) -> Dictionary:
+	var verdict := can_resurrect_elemental(unit, at)
+	if not verdict["ok"]:
+		return verdict
+	var target: Unit = null
+	for g in graveyard:
+		if g.owner == unit.owner and g.elemental:
+			target = g
+			break
+	graveyard.erase(target)
+	target.coord = at
+	target.reset_turn_state()
+	target.wounded = false
+	target.no_wound = true
+	units.append(target)
+	unit.acted = true
+	return {"ok": true, "reason": "%s возрождён" % target.name_ru}
 
 
 ## Погибшие фигуры игрока — кандидаты на воскрешение.
