@@ -181,16 +181,33 @@ func aura_defense_bonus(unit: Unit) -> int:
 
 
 func defense_bonus(unit: Unit, distance: int = 1) -> int:
-	return unit.armor + terrain_defense_bonus(unit, distance) + aura_defense_bonus(unit)
+	var bonus: int = unit.armor + terrain_defense_bonus(unit, distance) + aura_defense_bonus(unit)
+	if unit.abilities.has("earth_armor_bonus"):
+		bonus += 1
+	return bonus
 
 
 ## Дальность атаки фигуры в клетках (1 — только соседняя).
 func attack_range(unit: Unit) -> int:
-	return maxi(1, unit.range)
+	var r: int = maxi(1, unit.range)
+	if unit.abilities.has("bolt_range_bonus"):
+		r += 1
+	return r
 
 
 func attack_bonus(unit: Unit) -> int:
-	return unit.damage
+	var bonus: int = unit.damage
+	if unit.abilities.has("fire_damage_bonus"):
+		bonus += 1
+	return bonus
+
+
+## Пула передвижения фигуры с учётом пассивок (Вода +1).
+func move_value(unit: Unit) -> int:
+	var v: int = unit.mp_left
+	if unit.abilities.has("water_move_bonus"):
+		v += 1
+	return v
 
 
 # --- Активация фигур --------------------------------------------------------
@@ -230,7 +247,7 @@ func can_move(unit: Unit, to: Vector2i, extra_move: int = 0) -> Dictionary:
 		return {"ok": false, "reason": "эта фигура уже двигалась"}
 	if not board.has_cell(to):
 		return {"ok": false, "reason": "за пределами поля"}
-	var step: int = unit.mp_left + extra_move
+	var step: int = move_value(unit) + extra_move
 	if board.distance(unit.coord, to) > step:
 		return {"ok": false, "reason": "дальше, чем позволяет передвижение (%d)" % step}
 	if not reachable(unit, extra_move).has(to):
@@ -243,7 +260,7 @@ func reachable(unit: Unit, extra_move: int = 0) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
 	if unit.owner != current_player or unit.moved:
 		return result
-	var step: int = unit.mp_left + extra_move
+	var step: int = move_value(unit) + extra_move
 	var seen := {unit.coord: 0}
 	var queue: Array = [[unit.coord, 0]]
 	while not queue.is_empty():
@@ -257,7 +274,7 @@ func reachable(unit: Unit, extra_move: int = 0) -> Array[Vector2i]:
 				continue
 			if not board.is_passable(next, unit.traits()):
 				continue
-			if unit_at(next) != null:
+			if unit_at(next) != null and not unit.abilities.has("air_phase"):
 				continue
 			seen[next] = dist + 1
 			result.append(next)
