@@ -13,6 +13,12 @@ const FACTIONS := [
 const COLOR_TEXT := Color(0.94, 0.94, 0.92)
 const COLOR_DIM := Color(0.72, 0.74, 0.78)
 
+var _status_label: Label
+var _client: GameClient = null
+var _mode: String = ""   # "host" | "guest"
+var _join_token: String = ""
+var _sent: bool = false
+
 
 func _ready() -> void:
 	# Отладочный снимок не должен упираться в меню.
@@ -75,6 +81,8 @@ func _build() -> void:
 		button.pressed.connect(_on_faction_pressed.bind(faction["id"]))
 		column.add_child(button)
 
+	_build_online(column)
+
 
 func _button_style(color: Color) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
@@ -105,3 +113,90 @@ func _start(faction_id: String) -> void:
 	for i in FACTIONS.size():
 		GameConfig.factions[i + 1] = FACTIONS[(start + i) % FACTIONS.size()]["id"]
 	get_tree().change_scene_to_file.call_deferred("res://scenes/main.tscn")
+
+
+## Онлайн-секция: хост создаёт комнату, гость входит по коду. Пока не пришёл
+## state от сервера (матч не начался), остаёмся в меню.
+func _build_online(column: VBoxContainer) -> void:
+	var sep := HSeparator.new()
+	column.add_child(sep)
+
+	var url_field := LineEdit.new()
+	url_field.text = GameConfig.server_url
+	url_field.placeholder_text = "адрес сервера (ws://...)"
+	url_field.custom_minimum_size = Vector2(560.0, 40.0)
+	column.add_child(url_field)
+
+	var host_btn := Button.new()
+	host_btn.text = "Онлайн: создать комнату"
+	host_btn.custom_minimum_size = Vector2(560.0, 50.0)
+	host_btn.add_theme_font_size_override("font_size", 18)
+	host_btn.pressed.connect(func(): _connect_host(url_field.text))
+	column.add_child(host_btn)
+
+	var join_row := HBoxContainer.new()
+	join_row.add_theme_constant_override("separation", 8)
+	var token_field := LineEdit.new()
+	token_field.placeholder_text = "код комнаты"
+	token_field.custom_minimum_size = Vector2(420.0, 40.0)
+	join_row.add_child(token_field)
+	var join_btn := Button.new()
+	join_btn.text = "Войти по коду"
+	join_btn.custom_minimum_size = Vector2(140.0, 40.0)
+	join_btn.add_theme_font_size_override("font_size", 18)
+	join_btn.pressed.connect(func(): _connect_guest(url_field.text, token_field.text))
+	join_row.add_child(join_btn)
+	column.add_child(join_row)
+
+	_status_label = Label.new()
+	_status_label.text = ""
+	_status_label.add_theme_font_size_override("font_size", 16)
+	_status_label.add_theme_color_override("font_color", COLOR_DIM)
+	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(_status_label)
+
+
+func _connect_host(url: String) -> void:
+	_client = GameClient.new()
+	GameConfig.client = _client
+	GameConfig.online = true
+	GameConfig.server_url = url
+	_mode = "host"
+	_sent = false
+	_client.connect_to_server(url)
+	set_process(true)
+
+
+func _connect_guest(url: String, token: String) -> void:
+	_client = GameClient.new()
+	GameConfig.client = _client
+	GameConfig.online = true
+	GameConfig.server_url = url
+	_mode = "guest"
+	_join_token = token
+	_sent = false
+	_client.connect_to_server(url)
+	set_process(true)
+
+
+func _process(_delta: float) -> void:
+	if _client == null:
+		return
+	_client.poll()
+	if not _client.connected:
+		_status_label.text = "Подключение к %s..." % GameConfig.server_url
+		return
+	if not _sent:
+		if _mode == "host":
+			_client.create_room()
+			_sent = true
+		elif _mode == "guest":
+			_client.join_room(_join_token)
+			_sent = true
+	var rej := _client.last("rejected")
+	if not rej.is_empty():
+		_status_label.text = "Ошибка: %s" % str(rej.get("reason", ""))
+	elif _client.room_token != "":
+		_status_label.text = "Комната %s — ждём игроков..." % _client.room_token
+	if not _client.state.is_empty():
+		get_tree().change_scene_to_file.call_deferred("res://scenes/main.tscn")

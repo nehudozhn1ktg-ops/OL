@@ -61,10 +61,23 @@ var move_boost: int = 0
 var faction_ids: Dictionary = {}
 ## Открыта пауза «защитник может ответить биомассой» после объявления атаки.
 var pending_defense: bool = false
+## Сетевой режим (NET-001): клиент и выбранная клетка (без локального Unit).
+var client: GameClient = null
+var _net_selected: Vector2i = Vector2i(-999999, -999999)
 
 
 func _ready() -> void:
 	board = Board.new()
+	if GameConfig.online and GameConfig.client != null:
+		_setup_network()
+	else:
+		_setup_local()
+	_fit_to_view()
+	queue_redraw()
+
+
+## Локальная партия: карта + локальный Game + отряды из меню.
+func _setup_local() -> void:
 	var map_path := MAP_PATH
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--map="):
@@ -76,8 +89,19 @@ func _ready() -> void:
 	game = Game.new()
 	game.setup(board, null, GameConfig.player_count())
 	_place_demo_units()
-	_fit_to_view()
-	queue_redraw()
+
+
+## Онлайн-партия (NET-001): карту рисуем локально, фигуры и ход — с сервера.
+func _setup_network() -> void:
+	board.load_map(MatchSetup.MAP_PATH)
+	client = GameConfig.client
+	set_process(true)
+
+
+func _process(_delta: float) -> void:
+	if client != null:
+		client.poll()
+		queue_redraw()
 
 
 ## Отряды всех игроков из фракционных листов: по шесть фигур к своим флагам.
@@ -213,14 +237,20 @@ func _draw() -> void:
 
 	if selected_unit != null and board.has_cell(selected_unit.coord):
 		_draw_outline(selected_unit.coord, COLOR_SELECTED, 3.0)
+	if client != null and board.has_cell(_net_selected):
+		_draw_outline(_net_selected, COLOR_SELECTED, 3.0)
 	if has_hover and board.has_cell(hovered):
 		_draw_outline(hovered, COLOR_HOVER, 2.0)
 	for target in attack_targets:
 		if board.has_cell(target.coord):
 			_draw_outline(target.coord, COLOR_ATTACK, 3.0)
 
-	for unit in game.units:
-		_draw_unit(unit)
+	if client != null:
+		for u in client.state.get("units", []):
+			_draw_network_unit(u)
+	else:
+		for unit in game.units:
+			_draw_unit(unit)
 
 
 func _hex_rect(center: Vector2) -> Rect2:
@@ -243,6 +273,22 @@ func _draw_unit(unit: Unit) -> void:
 	draw_arc(center, hex_size * 0.46, 0.0, TAU, 24, ring, 2.0, true)
 	if unit.wounded:
 		# отметка раны — косой крест
+		var d: float = hex_size * 0.2
+		draw_line(center - Vector2(d, d), center + Vector2(d, d), Color(1, 1, 1, 0.9), 2.0)
+		draw_line(center + Vector2(d, -d), center - Vector2(d, -d), Color(1, 1, 1, 0.9), 2.0)
+
+
+## Рисует фигуру из серверного state (словарь), а не из локального Unit.
+func _draw_network_unit(u: Dictionary) -> void:
+	var center := hex_to_pixel(Vector2i(int(u["q"]), int(u["r"])))
+	var color: Color = OWNER_COLOR.get(int(u["owner"]), Color.WHITE)
+	if bool(u.get("wounded", false)):
+		color = color.darkened(0.35)
+	draw_circle(center, hex_size * 0.52, Color(0, 0, 0, 0.55))
+	draw_circle(center, hex_size * 0.46, color)
+	var ring := Color("#ff8a4a") if bool(u.get("wounded", false)) else Color(1, 1, 1, 0.85)
+	draw_arc(center, hex_size * 0.46, 0.0, TAU, 24, ring, 2.0, true)
+	if bool(u.get("wounded", false)):
 		var d: float = hex_size * 0.2
 		draw_line(center - Vector2(d, d), center + Vector2(d, d), Color(1, 1, 1, 0.9), 2.0)
 		draw_line(center + Vector2(d, -d), center - Vector2(d, -d), Color(1, 1, 1, 0.9), 2.0)
@@ -359,8 +405,28 @@ func _finish_attack() -> void:
 	status.emit(text)
 
 
+## Сетевой клик: выбрать свою фигуру, затем клик по клетке — сходить.
+func _network_click(coord: Vector2i) -> void:
+	for u in client.state.get("units", []):
+		if int(u.get("owner", 0)) == client.seat and int(u["q"]) == coord.x and int(u["r"]) == coord.y:
+			_net_selected = coord
+			status.emit("Фигура выбрана — кликните по клетке, чтобы пойти.")
+			queue_redraw()
+			return
+	if board.has_cell(_net_selected):
+		client.intent("move", {"from": [_net_selected.x, _net_selected.y], "to": [coord.x, coord.y]})
+		_net_selected = Vector2i(-999999, -999999)
+		status.emit("Ход отправлен серверу.")
+		queue_redraw()
+		return
+	status.emit("Клетка (%d, %d) · %s" % [coord.x, coord.y, terrain_name(board.terrain_at(coord))])
+
+
 func _click(coord: Vector2i) -> void:
 	if not board.has_cell(coord):
+		return
+	if client != null:
+		_network_click(coord)
 		return
 
 	var clicked := game.unit_at(coord)
@@ -507,7 +573,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			has_hover = false
 			queue_redraw()
 			tile_hovered_changed.emit(hovered, false)
-		var under_cursor: Unit = game.unit_at(coord) if board.has_cell(coord) else null
+		var under_cursor: Unit = null
+		if board.has_cell(coord) and game != null:
+			under_cursor = game.unit_at(coord)
 		if under_cursor != hovered_unit:
 			hovered_unit = under_cursor
 			unit_hovered_changed.emit(under_cursor)
@@ -523,6 +591,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 ## Передать ход: пробел или кнопка «Конец хода» в HUD (на мобильных пробела нет).
 func end_turn() -> void:
+	if client != null:
+		client.intent("end_turn")
+		_net_selected = Vector2i(-999999, -999999)
+		status.emit("Ход передан (ждём сервер).")
+		queue_redraw()
+		return
 	game.end_turn()
 	_clear_selection()
 	status.emit("Ход передан игроку %d (раунд %d)" % [game.current_player, game.round_number])
