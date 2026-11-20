@@ -17,6 +17,7 @@ var seat: int = 0
 var state: Dictionary = {}
 ## События боя (удары, ранения, гибель) — для анимаций.
 var events: Array = []
+var _seq: int = 0
 
 
 func connect_to_server(url: String) -> void:
@@ -36,6 +37,8 @@ func poll() -> void:
 
 func send(obj: Dictionary) -> void:
 	if ws != null:
+		obj["seq"] = _seq
+		_seq += 1
 		ws.send_text(JSON.stringify(obj))
 
 

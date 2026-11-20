@@ -18,6 +18,9 @@ var rooms: Dictionary = {}
 var _peers: Array[Dictionary] = []
 var _next_peer_id: int = 1
 var _crypto := Crypto.new()
+## Время жизни незапущенной комнаты (мс) и лимит неудачных входов на peer.
+var room_timeout_ms: int = 300000
+var max_bad_joins: int = 10
 
 
 func listen(port: int) -> Error:
@@ -44,7 +47,8 @@ func poll() -> void:
 	while tcp != null and tcp.is_connection_available():
 		var ws := WebSocketPeer.new()
 		ws.accept_stream(tcp.take_connection())
-		_peers.append({"ws": ws, "id": _next_peer_id, "nick": "гость", "room": "", "player": 0})
+		_peers.append({"ws": ws, "id": _next_peer_id, "nick": "гость", "room": "", "player": 0,
+			"seq": -1, "bad_joins": 0})
 		_next_peer_id += 1
 
 	for peer in _peers:
@@ -54,6 +58,8 @@ func poll() -> void:
 			_handle(peer, ws.get_packet().get_string_from_utf8())
 
 	_peers = _peers.filter(func(peer): return peer["ws"].get_ready_state() != WebSocketPeer.STATE_CLOSED)
+	if room_timeout_ms > 0:
+		_expire_rooms()
 
 
 func _handle(p: Dictionary, raw: String) -> void:
@@ -61,6 +67,12 @@ func _handle(p: Dictionary, raw: String) -> void:
 	if not msg is Dictionary or not msg.has("type"):
 		_send(p, {"type": "rejected", "reason": "плохой json"})
 		return
+	var seq := int(msg.get("seq", -1))
+	if seq >= 0:
+		if seq <= int(p.get("seq", -1)):
+			_send(p, {"type": "rejected", "reason": "повтор сообщения"})
+			return
+		p["seq"] = seq
 	var payload: Dictionary = msg.get("payload", {})
 	match str(msg["type"]):
 		"hello":
@@ -82,7 +94,7 @@ func _create_room(p: Dictionary) -> void:
 		_send(p, {"type": "rejected", "reason": "уже в комнате"})
 		return
 	var token := _new_token()
-	rooms[token] = {"seats": {1: p["id"]}}
+	rooms[token] = {"seats": {1: p["id"]}, "created": Time.get_ticks_msec()}
 	p["room"] = token
 	p["player"] = 1
 	_send(p, {"type": "room_created", "payload": {"invite_token": token, "player": 1}})
@@ -93,6 +105,10 @@ func _join_room(p: Dictionary, token: String) -> void:
 		_send(p, {"type": "rejected", "reason": "уже в комнате"})
 		return
 	if not rooms.has(token):
+		p["bad_joins"] = int(p.get("bad_joins", 0)) + 1
+		if int(p["bad_joins"]) > max_bad_joins:
+			_send(p, {"type": "rejected", "reason": "слишком много попыток"})
+			return
 		_send(p, {"type": "rejected", "reason": "комната не найдена"})
 		return
 	var room: Dictionary = rooms[token]
@@ -109,6 +125,19 @@ func _join_room(p: Dictionary, token: String) -> void:
 	_send(p, {"type": "seat_assigned", "payload": {"invite_token": token, "player": seat}})
 	if seats.size() >= MAX_SEATS:
 		_start_match(token)
+
+
+## Истечение незапущенных комнат (таймаут из аудита P3).
+func _expire_rooms() -> void:
+	var now := Time.get_ticks_msec()
+	for token in rooms.keys():
+		var room: Dictionary = rooms[token]
+		var seats: Dictionary = room.get("seats", {})
+		if seats.size() >= MAX_SEATS:
+			continue
+		if now - int(room.get("created", 0)) > room_timeout_ms:
+			_broadcast(token, {"type": "room_closed", "payload": {"reason": "комната истекла"}})
+			rooms.erase(token)
 
 
 ## Матч: когда комната заполнилась, сервер сам строит партию и становится
