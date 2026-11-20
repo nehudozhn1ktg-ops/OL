@@ -1,6 +1,5 @@
 # Godot — служебные файлы, не коммитим
 .godot/
-export_presets.cfg
 *.translation
 android/
 ios/
