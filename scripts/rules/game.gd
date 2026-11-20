@@ -1491,3 +1491,36 @@ func units_of(player: int) -> Array[Unit]:
 		if unit.owner == player:
 			result.append(unit)
 	return result
+
+
+## Итог партии для экрана победы: строки статистики (очки, живые, могила).
+func victory_summary() -> Array[String]:
+	var lines: Array[String] = []
+	if winner != 0:
+		lines.append("Победил игрок %d!" % winner)
+	for player in scores.keys():
+		var alive := units_of(player).size()
+		var dead := 0
+		for g in graveyard:
+			if g.owner == player:
+				dead += 1
+		lines.append("Игрок %d: %d очков, %d живых, %d в могиле" % [player, int(scores[player]), alive, dead])
+	return lines
+
+
+## Автосохранение (каркас): сбрасывает ключевое состояние партии в файл.
+## Полный сброс (террейн, ресурсы, коконы) — отдельным шагом.
+func save_state(path: String) -> void:
+	var cf := ConfigFile.new()
+	cf.set_value("game", "current_player", current_player)
+	cf.set_value("game", "turn_number", turn_number)
+	cf.set_value("game", "round_number", round_number)
+	cf.set_value("game", "is_day", is_day)
+	cf.set_value("game", "winner", winner)
+	cf.set_value("game", "scores", scores)
+	var unit_list: Array = []
+	for u in units:
+		unit_list.append({"owner": u.owner, "q": u.coord.x, "r": u.coord.y,
+			"id": u.unit_id, "kind": u.kind, "wounded": u.wounded})
+	cf.set_value("game", "units", unit_list)
+	cf.save(path)
