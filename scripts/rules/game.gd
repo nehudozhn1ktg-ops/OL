@@ -164,9 +164,12 @@ func unit_at(coord: Vector2i) -> Unit:
 # --- Взаимодействия: свойства объектов дают числа ---------------------------
 
 ## Бонус защиты от террейна. Патч 7: лес защищает только от атаки с соседней
-## клетки — дальний выстрел в лес бонуса не получает.
+## клетки — дальний выстрел в лес бонуса не получает. Дерево (tree_bark):
+## трава для этой фигуры считается лесом.
 func terrain_defense_bonus(unit: Unit, distance: int = 1) -> int:
 	var terrain: int = board.terrain_at(unit.coord)
+	if unit.abilities.has("tree_bark") and terrain == Board.TERRAIN_GRASS:
+		terrain = Board.TERRAIN_FOREST
 	if terrain == Board.TERRAIN_FOREST and distance > 1:
 		return 0
 	return int(TERRAIN_DEFENSE.get(terrain, 0))
@@ -505,6 +508,35 @@ func teleport(unit: Unit, to: Vector2i) -> Dictionary:
 	unit.coord = to
 	unit.moved = true
 	return {"ok": true, "reason": "телепортация выполнена"}
+
+
+## Магнетизм: после движения притянуть свою пешку/командира на соседнюю клетку.
+func can_pull_ally(unit: Unit, target: Unit, to: Vector2i) -> Dictionary:
+	if not unit.abilities.has("magnet_pull"):
+		return {"ok": false, "reason": "магнетизм доступен только слиянию Магнетизм"}
+	if unit.owner != current_player:
+		return {"ok": false, "reason": "сейчас ход другого игрока"}
+	if not unit.moved:
+		return {"ok": false, "reason": "сначала передвиньте Магнетизм"}
+	if target == null or not units.has(target) or target == unit:
+		return {"ok": false, "reason": "нет такой фигуры"}
+	if target.owner != unit.owner:
+		return {"ok": false, "reason": "только свою фигуру"}
+	if target.kind != "pawn" and target.kind != "commander":
+		return {"ok": false, "reason": "только пешку или командира"}
+	if board.distance(unit.coord, to) != 1:
+		return {"ok": false, "reason": "только на соседнюю от Магнетизма клетку"}
+	if not board.has_cell(to) or not board.is_passable(to) or unit_at(to) != null:
+		return {"ok": false, "reason": "клетка занята или непроходима"}
+	return {"ok": true, "reason": ""}
+
+
+func pull_ally(unit: Unit, target: Unit, to: Vector2i) -> Dictionary:
+	var verdict := can_pull_ally(unit, target, to)
+	if not verdict["ok"]:
+		return verdict
+	target.coord = to
+	return {"ok": true, "reason": "фигура притянута"}
 
 
 # --- Бой --------------------------------------------------------------------
