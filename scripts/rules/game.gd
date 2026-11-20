@@ -75,6 +75,10 @@ var essence: Dictionary = {}
 ## Энергия природы эльфов (0–2) и +1 активация в текущий ход (сбрасывается в начале хода).
 var energy: Dictionary = {}
 var extra_activations: Dictionary = {}
+## Урна душ нежити: одноразовая фишка — до конца хода эссенция на максимуме.
+var urn_used: Dictionary = {}
+var urn_active: Dictionary = {}
+var essence_before_urn: Dictionary = {}
 ## Погибшие фигуры — для воскрешения Некромантом (ADR-012).
 var graveyard: Array[Unit] = []
 ## Призываемые фигуры: player -> {unit_id: Dictionary (данные фракционного листа)}.
@@ -100,6 +104,9 @@ func setup(board_: Board, dice_: Dice = null, player_count_: int = 2) -> void:
 	essence.clear()
 	energy.clear()
 	extra_activations.clear()
+	urn_used.clear()
+	urn_active.clear()
+	essence_before_urn.clear()
 	graveyard.clear()
 	summon_defs.clear()
 	pending_attack.clear()
@@ -594,6 +601,22 @@ func use_nature_energy(player: int) -> Dictionary:
 	return {"ok": true, "reason": "+1 активация в этот ход"}
 
 
+# --- Урна душ нежити ----------------------------------------------------------
+
+## Одноразовая фишка: до конца хода эссенция — максимум, в конце хода
+## возвращается к значению начала хода (патч 7).
+func use_urn_of_souls(player: int) -> Dictionary:
+	if bool(urn_used.get(player, false)):
+		return {"ok": false, "reason": "урна душ уже использована"}
+	if bool(urn_active.get(player, false)):
+		return {"ok": false, "reason": "урна уже активна в этот ход"}
+	urn_used[player] = true
+	essence_before_urn[player] = essence_of(player)
+	essence[player] = ESSENCE_MAX
+	urn_active[player] = true
+	return {"ok": true, "reason": "до конца хода эссенция — максимум"}
+
+
 ## +ресурс за уничтоженного противника — по фракции убийцы.
 func _gain_kill_resource(player: int) -> void:
 	match str(factions.get(player, "")):
@@ -919,6 +942,9 @@ func begin_turn() -> void:
 
 
 func end_turn() -> void:
+	if bool(urn_active.get(current_player, false)):
+		essence[current_player] = int(essence_before_urn.get(current_player, 0))
+		urn_active[current_player] = false
 	pending_attack.clear()
 	current_player = (current_player % player_count) + 1
 	if current_player == 1:
