@@ -10,9 +10,6 @@ extends RefCounted
 ## choose_faction / intent / state / event.
 
 const MAX_SEATS := 4
-## Фракции в порядке мест 1–4 (FFA: одна фракция на игрока).
-const FACTIONS := ["infected", "undead", "people", "elves"]
-const MAP_PATH := "res://assets/maps/data/4ffa.json"
 
 var tcp: TCPServer = null
 ## invite_token -> {seats: {seat:int -> peer_id}}
@@ -119,29 +116,16 @@ func _join_room(p: Dictionary, token: String) -> void:
 func _start_match(token: String) -> void:
 	var room: Dictionary = rooms[token]
 	var board := Board.new()
-	if not board.load_map(MAP_PATH):
+	if not board.load_map(MatchSetup.MAP_PATH):
 		_broadcast(token, {"type": "rejected", "reason": "не загрузилась карта"})
 		return
 	var game := Game.new()
 	game.setup(board, null, MAX_SEATS)
 
 	var faction_ids := {}
-	var flags := _flags(board)
 	for seat in range(1, MAX_SEATS + 1):
-		var fid: String = FACTIONS[seat - 1]
-		faction_ids[seat] = fid
-		var faction := FactionData.load_file("res://data/factions/%s.json" % fid)
-		var roster := FactionData.roster(faction, 6)
-		game.add_flag(seat, flags[seat - 1])
-		game.place_roster(seat, flags[seat - 1], roster)
-	game.factions = faction_ids
-	for seat in faction_ids.keys():
-		if faction_ids[seat] == "infected":
-			game.start_biomass(seat)
-		elif faction_ids[seat] == "undead":
-			game.start_essence(seat)
-			game.register_summonables(seat,
-				FactionData.summonables(FactionData.load_file("res://data/factions/undead.json")))
+		faction_ids[seat] = MatchSetup.FACTIONS[seat - 1]
+	MatchSetup.place(game, board, faction_ids)
 	room["game"] = game
 	room["board"] = board
 	room["factions"] = faction_ids
@@ -150,7 +134,7 @@ func _start_match(token: String) -> void:
 
 
 ## Намерение хода. Сервер проверяет, что ходит именно этот игрок, и применяет
-## действие через правила. Сейчас — end_turn; движение/бой добавятся следом.
+## действие через правила (Game.can_*), затем рассылает state/event.
 func _intent(p: Dictionary, payload: Dictionary) -> void:
 	var token: String = p["room"]
 	if token == "" or not rooms.has(token):
@@ -167,18 +151,63 @@ func _intent(p: Dictionary, payload: Dictionary) -> void:
 		"end_turn":
 			game.end_turn()
 			_broadcast(token, {"type": "state", "payload": _state(token)})
+		"activate":
+			_activate(p, token, game, payload)
+		"move":
+			_move(p, token, game, payload)
+		"attack":
+			_attack(p, token, game, payload)
 		_:
 			_send(p, {"type": "rejected", "reason": "действие не поддерживается"})
 
 
-## Клетки-флаги карты в детерминированном порядке.
-func _flags(board: Board) -> Array[Vector2i]:
-	var flags: Array[Vector2i] = []
-	for coord in board.cells.keys():
-		if board.terrain_at(coord) == Board.TERRAIN_FLAG:
-			flags.append(coord)
-	flags.sort_custom(func(a, b): return a.x < b.x)
-	return flags
+func _activate(p: Dictionary, token: String, game: Game, payload: Dictionary) -> void:
+	var unit := game.unit_at(_coord(payload.get("from")))
+	if unit == null or unit.owner != game.current_player:
+		_send(p, {"type": "rejected", "reason": "нет вашей фигуры на этой клетке"})
+		return
+	if not game.activate(unit):
+		_send(p, {"type": "rejected", "reason": game.can_activate(unit)["reason"]})
+		return
+	_broadcast(token, {"type": "state", "payload": _state(token)})
+
+
+func _move(p: Dictionary, token: String, game: Game, payload: Dictionary) -> void:
+	var unit := game.unit_at(_coord(payload.get("from")))
+	if unit == null:
+		_send(p, {"type": "rejected", "reason": "нет фигуры на этой клетке"})
+		return
+	var to := _coord(payload.get("to"))
+	var verdict := game.can_move(unit, to)
+	if not verdict["ok"]:
+		_send(p, {"type": "rejected", "reason": verdict["reason"]})
+		return
+	game.move_unit(unit, to)
+	_broadcast(token, {"type": "state", "payload": _state(token)})
+
+
+func _attack(p: Dictionary, token: String, game: Game, payload: Dictionary) -> void:
+	var attacker := game.unit_at(_coord(payload.get("from")))
+	var defender := game.unit_at(_coord(payload.get("target")))
+	if attacker == null:
+		_send(p, {"type": "rejected", "reason": "нет фигуры на этой клетке"})
+		return
+	if defender == null:
+		_send(p, {"type": "rejected", "reason": "нет цели на этой клетке"})
+		return
+	var verdict := game.can_attack(attacker, defender)
+	if not verdict["ok"]:
+		_send(p, {"type": "rejected", "reason": verdict["reason"]})
+		return
+	var blow := game.attack(attacker, defender)
+	_broadcast(token, {"type": "event", "payload": blow})
+	_broadcast(token, {"type": "state", "payload": _state(token)})
+
+
+func _coord(v) -> Vector2i:
+	if v is Array and v.size() >= 2:
+		return Vector2i(int(v[0]), int(v[1]))
+	return Vector2i(-999999, -999999)
 
 
 ## Компактное состояние матча для рассылки клиентам.
@@ -187,7 +216,7 @@ func _state(token: String) -> Dictionary:
 	var units: Array = []
 	for u in game.units:
 		units.append({"owner": u.owner, "q": u.coord.x, "r": u.coord.y,
-			"name": u.name_ru, "wounded": u.wounded})
+			"name": u.name_ru, "wounded": u.wounded, "activated": u.activated, "moved": u.moved})
 	return {
 		"current_player": game.current_player,
 		"turn_number": game.turn_number,
