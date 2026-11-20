@@ -14,6 +14,8 @@ const MAX_SEATS := 4
 var tcp: TCPServer = null
 ## invite_token -> {seats: {seat:int -> peer_id}}
 var rooms: Dictionary = {}
+## guest_id -> {nick, room, player, seq} — переживает обрыв соединения (реконнект).
+var _guests: Dictionary = {}
 
 var _peers: Array[Dictionary] = []
 var _next_peer_id: int = 1
@@ -73,12 +75,11 @@ func _handle(p: Dictionary, raw: String) -> void:
 			_send(p, {"type": "rejected", "reason": "повтор сообщения"})
 			return
 		p["seq"] = seq
+		_save_guest(p)
 	var payload: Dictionary = msg.get("payload", {})
 	match str(msg["type"]):
 		"hello":
-			if payload.has("nick") and str(payload["nick"]) != "":
-				p["nick"] = str(payload["nick"])
-			_send(p, {"type": "welcome", "payload": {"guest_id": p["id"], "nick": p["nick"]}})
+			_resume_or_register(p, payload)
 		"create_room":
 			_create_room(p)
 		"join_room":
@@ -97,6 +98,7 @@ func _create_room(p: Dictionary) -> void:
 	rooms[token] = {"seats": {1: p["id"]}, "created": Time.get_ticks_msec()}
 	p["room"] = token
 	p["player"] = 1
+	_save_guest(p)
 	_send(p, {"type": "room_created", "payload": {"invite_token": token, "player": 1}})
 
 
@@ -122,6 +124,7 @@ func _join_room(p: Dictionary, token: String) -> void:
 	seats[seat] = p["id"]
 	p["room"] = token
 	p["player"] = seat
+	_save_guest(p)
 	_send(p, {"type": "seat_assigned", "payload": {"invite_token": token, "player": seat}})
 	if seats.size() >= MAX_SEATS:
 		_start_match(token)
@@ -138,6 +141,35 @@ func _expire_rooms() -> void:
 		if now - int(room.get("created", 0)) > room_timeout_ms:
 			_broadcast(token, {"type": "room_closed", "payload": {"reason": "комната истекла"}})
 			rooms.erase(token)
+
+
+## hello: новый гость регистрируется; повторный hello с guest_id возвращает его
+## в ту же партию (переподключение, аудит P3).
+func _resume_or_register(p: Dictionary, payload: Dictionary) -> void:
+	var resume_id := int(payload.get("guest_id", 0))
+	if resume_id != 0 and _guests.has(resume_id):
+		var rec: Dictionary = _guests[resume_id]
+		p["id"] = resume_id
+		p["nick"] = str(rec.get("nick", "гость"))
+		p["room"] = str(rec.get("room", ""))
+		p["player"] = int(rec.get("player", 0))
+		p["seq"] = int(rec.get("seq", -1))
+	else:
+		if payload.has("nick") and str(payload["nick"]) != "":
+			p["nick"] = str(payload["nick"])
+		_save_guest(p)
+	_send(p, {"type": "welcome", "payload": {"guest_id": p["id"], "nick": p["nick"]}})
+	if p["room"] != "" and rooms.has(p["room"]):
+		_send(p, {"type": "seat_assigned", "payload": {"invite_token": p["room"], "player": p["player"]}})
+		if rooms[p["room"]].get("game") != null:
+			_send(p, {"type": "state", "payload": _state(p["room"])})
+
+
+## Сохранить текущее состояние гостя (переживает обрыв).
+func _save_guest(p: Dictionary) -> void:
+	if int(p["id"]) > 0:
+		_guests[int(p["id"])] = {"nick": p["nick"], "room": p["room"],
+			"player": p["player"], "seq": int(p.get("seq", -1))}
 
 
 ## Матч: когда комната заполнилась, сервер сам строит партию и становится

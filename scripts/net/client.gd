@@ -44,7 +44,17 @@ func send(obj: Dictionary) -> void:
 
 func hello(nick_: String) -> void:
 	nick = nick_
-	send({"type": "hello", "payload": {"nick": nick}})
+	var payload := {"nick": nick}
+	if guest_id != 0:
+		payload["guest_id"] = guest_id
+	send({"type": "hello", "payload": payload})
+
+
+## Переподключение: восстановить сессию по ранее полученному guest_id.
+func resume(nick_: String, guest_id_: int) -> void:
+	nick = nick_
+	guest_id = guest_id_
+	send({"type": "hello", "payload": {"nick": nick, "guest_id": guest_id}})
 
 
 func create_room() -> void:
