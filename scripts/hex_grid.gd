@@ -22,6 +22,7 @@ const TERRAIN_FILL := {
 	4: Color("#9b6fc4"),  # ключевая точка
 	5: Color("#d8c34a"),  # флаг
 	6: Color("#b3543a"),  # лагерь
+	7: Color("#8a5a2a"),  # баррикада
 }
 ## Тайлы из набора артов (assets/tiles). Пропорция flat-top: 2 : sqrt(3).
 const TERRAIN_TEXTURE := {
@@ -148,6 +149,8 @@ func _place_demo_units() -> void:
 			game.register_summonables(player, FactionData.summonables(factions_data[player]))
 		elif faction_ids[player] == "elves":
 			game.start_energy(player)
+		elif faction_ids[player] == "people":
+			game.start_barricades(player)
 
 
 func _place_team(player: int, anchor: Vector2i, roster: Array) -> void:
@@ -534,6 +537,8 @@ func terrain_name(terrain: int) -> String:
 			return "флаг"
 		Board.TERRAIN_CAMP:
 			return "лагерь"
+		Board.TERRAIN_BARRICADE:
+			return "баррикада"
 		_:
 			return "?"
 

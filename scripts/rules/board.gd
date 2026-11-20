@@ -14,12 +14,14 @@ const TERRAIN_FORT := 3
 const TERRAIN_KEY := 4
 const TERRAIN_FLAG := 5
 const TERRAIN_CAMP := 6
+const TERRAIN_BARRICADE := 7
 
 const TERRAIN_LAND := TERRAIN_GRASS
 
 const TERRAIN_NAMES := {
 	"grass": TERRAIN_GRASS, "water": TERRAIN_WATER, "forest": TERRAIN_FOREST,
 	"fort": TERRAIN_FORT, "key": TERRAIN_KEY, "flag": TERRAIN_FLAG, "camp": TERRAIN_CAMP,
+	"barricade": TERRAIN_BARRICADE,
 }
 
 ## Шесть направлений для flat-top гексов (аксиальные координаты).
@@ -80,8 +82,8 @@ func is_water(coord: Vector2i) -> bool:
 func is_passable(coord: Vector2i, traits: Dictionary = {}) -> bool:
 	if not cells.has(coord):
 		return false
-	if cells[coord] == TERRAIN_FLAG:
-		return false  # канон: флаг — физическое препятствие, сквозь него нельзя
+	if cells[coord] == TERRAIN_FLAG or cells[coord] == TERRAIN_BARRICADE:
+		return false  # канон: флаг и баррикада — физические препятствия
 	if cells[coord] == TERRAIN_WATER:
 		return bool(traits.get("water_walk", false))
 	return true

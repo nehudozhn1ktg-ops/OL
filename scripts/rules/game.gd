@@ -31,6 +31,9 @@ const ESSENCE_PER_KILL := 1
 ## Энергия природы эльфов: 2 фишки на фракционном листе, без пополнения.
 const ENERGY_START := 2
 
+## Баррикады людей: 4 фишки, без пополнения.
+const BARRICADE_START := 4
+
 ## Цены заклинаний Некроманта (ADR-012, патч 7): пешка — 2, командир — 3,
 ## уничтожение чужой пешки/командира — 4.
 const ESSENCE_SUMMON_PAWN := 2
@@ -79,6 +82,8 @@ var extra_activations: Dictionary = {}
 var urn_used: Dictionary = {}
 var urn_active: Dictionary = {}
 var essence_before_urn: Dictionary = {}
+## Баррикады людей: player -> остаток фишек (0–4).
+var barricades: Dictionary = {}
 ## Погибшие фигуры — для воскрешения Некромантом (ADR-012).
 var graveyard: Array[Unit] = []
 ## Призываемые фигуры: player -> {unit_id: Dictionary (данные фракционного листа)}.
@@ -107,6 +112,7 @@ func setup(board_: Board, dice_: Dice = null, player_count_: int = 2) -> void:
 	urn_used.clear()
 	urn_active.clear()
 	essence_before_urn.clear()
+	barricades.clear()
 	graveyard.clear()
 	summon_defs.clear()
 	pending_attack.clear()
@@ -615,6 +621,81 @@ func use_urn_of_souls(player: int) -> Dictionary:
 	essence[player] = ESSENCE_MAX
 	urn_active[player] = true
 	return {"ok": true, "reason": "до конца хода эссенция — максимум"}
+
+
+# --- Баррикады людей ----------------------------------------------------------
+
+func start_barricades(player: int) -> void:
+	barricades[player] = BARRICADE_START
+
+
+func barricades_of(player: int) -> int:
+	return int(barricades.get(player, 0))
+
+
+func spend_barricade(player: int) -> bool:
+	if barricades_of(player) < 1:
+		return false
+	barricades[player] = barricades_of(player) - 1
+	return true
+
+
+## Поставить баррикаду на клетку, соседнюю со своей фигурой (патч 7).
+func can_place_barricade(player: int, coord: Vector2i) -> Dictionary:
+	if barricades_of(player) < 1:
+		return {"ok": false, "reason": "нет фишек «баррикада»"}
+	if not board.has_cell(coord):
+		return {"ok": false, "reason": "клетка за пределами поля"}
+	if board.is_water(coord):
+		return {"ok": false, "reason": "на воду баррикаду ставить нельзя"}
+	var terrain: int = board.terrain_at(coord)
+	if terrain == Board.TERRAIN_FLAG or terrain == Board.TERRAIN_BARRICADE:
+		return {"ok": false, "reason": "клетка занята препятствием"}
+	if unit_at(coord) != null:
+		return {"ok": false, "reason": "клетка занята фигурой"}
+	var adjacent := false
+	for unit in units_of(player):
+		if board.distance(unit.coord, coord) == 1:
+			adjacent = true
+			break
+	if not adjacent:
+		return {"ok": false, "reason": "баррикада ставится только рядом со своей фигурой"}
+	return {"ok": true, "reason": ""}
+
+
+func place_barricade(player: int, coord: Vector2i) -> Dictionary:
+	var verdict := can_place_barricade(player, coord)
+	if not verdict["ok"]:
+		return verdict
+	spend_barricade(player)
+	board.set_terrain(coord, Board.TERRAIN_BARRICADE)
+	return {"ok": true, "reason": "баррикада поставлена"}
+
+
+## Баррикада уничтожается атакой любой силы (без броска и очков).
+func can_attack_barricade(attacker: Unit, coord: Vector2i) -> Dictionary:
+	if board.terrain_at(coord) != Board.TERRAIN_BARRICADE:
+		return {"ok": false, "reason": "здесь нет баррикады"}
+	if attacker.owner != current_player:
+		return {"ok": false, "reason": "сейчас ход другого игрока"}
+	if not attacker.activated:
+		return {"ok": false, "reason": "фигура не активирована"}
+	if not attacker.can_attack:
+		return {"ok": false, "reason": "эта фигура не может атаковать"}
+	if attacker.attacked:
+		return {"ok": false, "reason": "эта фигура уже атаковала"}
+	if board.distance(attacker.coord, coord) != 1:
+		return {"ok": false, "reason": "атака только по соседней клетке"}
+	return {"ok": true, "reason": ""}
+
+
+func attack_barricade(attacker: Unit, coord: Vector2i) -> Dictionary:
+	var verdict := can_attack_barricade(attacker, coord)
+	if not verdict["ok"]:
+		return {"destroyed": false, "reason": verdict["reason"]}
+	attacker.attacked = true
+	board.set_terrain(coord, Board.TERRAIN_GRASS)
+	return {"destroyed": true, "reason": "баррикада разрушена"}
 
 
 ## +ресурс за уничтоженного противника — по фракции убийцы.
