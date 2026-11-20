@@ -88,12 +88,15 @@
 
 ## NET-001 (в работе)
 
-- Транспорт проверен: `tests/websocket.gd` — headless Godot держит WebSocket-сервер,
-  клиент гоняет JSON в обе стороны (4 проверки PASS).
-- План, протокол и комнатная модель: `docs/web-mvp/NET-001.md`.
+- Транспорт: `tests/websocket.gd` — 4 проверки PASS.
+- Сервер и комнаты: `scripts/net/server.gd` (GameServer, чистая логика) +
+  запускаемый `scripts/server.gd` (headless). `tests/server.gd` — 11 проверок PASS:
+  hello/welcome, create_room/join_room, 4 места, отказ пятому, неверный токен.
+  Токен — 16 байт CSPRNG → 32 hex.
+- План и протокол: `docs/web-mvp/NET-001.md`.
 
-_Следующий шаг: `scripts/server.gd` (приём соединений, hello/welcome), затем комнаты
-и авторитетный матч._
+_Следующий шаг: авторитетный матч — сервер держит Game на комнату, применяет
+`intent` через правила, рассылает `state`; затем клиентский сетевой слой._
 
 ## Воспроизводимость (важно для агентов)
 
