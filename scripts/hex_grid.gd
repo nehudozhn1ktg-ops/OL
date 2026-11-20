@@ -146,6 +146,8 @@ func _place_demo_units() -> void:
 		elif faction_ids[player] == "undead":
 			game.start_essence(player)
 			game.register_summonables(player, FactionData.summonables(factions_data[player]))
+		elif faction_ids[player] == "elves":
+			game.start_energy(player)
 
 
 func _place_team(player: int, anchor: Vector2i, roster: Array) -> void:

@@ -28,6 +28,9 @@ const ESSENCE_MAX := 4
 const ESSENCE_START := 1
 const ESSENCE_PER_KILL := 1
 
+## Энергия природы эльфов: 2 фишки на фракционном листе, без пополнения.
+const ENERGY_START := 2
+
 ## Цены заклинаний Некроманта (ADR-012, патч 7): пешка — 2, командир — 3,
 ## уничтожение чужой пешки/командира — 4.
 const ESSENCE_SUMMON_PAWN := 2
@@ -69,6 +72,9 @@ var winner: int = 0
 var factions: Dictionary = {}
 ## Эссенция нежити по игрокам (0–4).
 var essence: Dictionary = {}
+## Энергия природы эльфов (0–2) и +1 активация в текущий ход (сбрасывается в начале хода).
+var energy: Dictionary = {}
+var extra_activations: Dictionary = {}
 ## Погибшие фигуры — для воскрешения Некромантом (ADR-012).
 var graveyard: Array[Unit] = []
 ## Призываемые фигуры: player -> {unit_id: Dictionary (данные фракционного листа)}.
@@ -92,6 +98,8 @@ func setup(board_: Board, dice_: Dice = null, player_count_: int = 2) -> void:
 	last_fort_reactions.clear()
 	biomass.clear()
 	essence.clear()
+	energy.clear()
+	extra_activations.clear()
 	graveyard.clear()
 	summon_defs.clear()
 	pending_attack.clear()
@@ -181,8 +189,9 @@ func can_activate(unit: Unit) -> Dictionary:
 		return {"ok": false, "reason": "сейчас ход другого игрока"}
 	if unit.activated:
 		return {"ok": false, "reason": "фигура уже активирована"}
-	if activated_count(current_player) >= MAX_ACTIVATIONS:
-		return {"ok": false, "reason": "на этот ход уже активированы %d фигуры" % MAX_ACTIVATIONS}
+	var limit: int = MAX_ACTIVATIONS + int(extra_activations.get(current_player, 0))
+	if activated_count(current_player) >= limit:
+		return {"ok": false, "reason": "на этот ход уже активированы %d фигуры" % limit}
 	return {"ok": true, "reason": ""}
 
 
@@ -555,6 +564,36 @@ func spend_essence(player: int, amount: int) -> bool:
 	return true
 
 
+# --- Энергия природы эльфов ---------------------------------------------------
+
+func start_energy(player: int) -> void:
+	energy[player] = ENERGY_START
+
+
+func energy_of(player: int) -> int:
+	return int(energy.get(player, 0))
+
+
+func spend_energy(player: int, amount: int) -> bool:
+	if amount <= 0:
+		return true
+	if energy_of(player) < amount:
+		return false
+	energy[player] = energy_of(player) - amount
+	return true
+
+
+## +1 активация в этот ход (патч 7). Раз в ход, тратит 1 энергию.
+func use_nature_energy(player: int) -> Dictionary:
+	if energy_of(player) < 1:
+		return {"ok": false, "reason": "нет энергии природы"}
+	if int(extra_activations.get(player, 0)) >= 1:
+		return {"ok": false, "reason": "энергия уже использована в этот ход"}
+	spend_energy(player, 1)
+	extra_activations[player] = 1
+	return {"ok": true, "reason": "+1 активация в этот ход"}
+
+
 ## +ресурс за уничтоженного противника — по фракции убийцы.
 func _gain_kill_resource(player: int) -> void:
 	match str(factions.get(player, "")):
@@ -875,6 +914,7 @@ func _add_score(player: int, amount: int) -> void:
 func begin_turn() -> void:
 	for unit in units:
 		unit.reset_turn_state()
+	extra_activations[current_player] = 0
 	points_collected_last = collect_points(current_player)
 
 

@@ -38,4 +38,6 @@ static func place(game: Game, board: Board, factions: Dictionary) -> Dictionary:
 			game.start_essence(player)
 			game.register_summonables(player,
 				FactionData.summonables(FactionData.load_file("res://data/factions/undead.json")))
+		elif faction_ids[player] == "elves":
+			game.start_energy(player)
 	return faction_ids
