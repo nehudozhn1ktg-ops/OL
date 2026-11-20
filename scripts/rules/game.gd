@@ -90,6 +90,8 @@ var cocoon: Dictionary = {}
 var graveyard: Array[Unit] = []
 ## Призываемые фигуры: player -> {unit_id: Dictionary (данные фракционного листа)}.
 var summon_defs: Dictionary = {}
+## Слияния Эфиральда: player -> {fusion_id: Dictionary}.
+var fusion_defs: Dictionary = {}
 ## Отложенная атака (двухфазный бой, ADR-015): объявление → (ответ защитника) → бросок.
 ## Ключи: attacker, defender, extra_damage, min_attack. Пусто — атаки не объявлено.
 var pending_attack: Dictionary = {}
@@ -118,6 +120,7 @@ func setup(board_: Board, dice_: Dice = null, player_count_: int = 2) -> void:
 	cocoon.clear()
 	graveyard.clear()
 	summon_defs.clear()
+	fusion_defs.clear()
 	pending_attack.clear()
 	winner = 0
 	begin_turn()
@@ -384,6 +387,63 @@ func castle_defense(defender: Unit, target: Unit) -> Dictionary:
 	target.coord = a
 	pending_attack["defender"] = target
 	return {"ok": true, "reason": "защитная рокировка: атака перенаправлена"}
+
+
+# --- Слияние Эфиральда --------------------------------------------------------
+
+## Элементаль, ещё не слитый (участвует в слиянии).
+func _is_elemental(unit: Unit) -> bool:
+	return unit != null and unit.elemental and not unit.fusion
+
+
+## По паре элементалей — id их слияния (или пусто).
+func _fusion_for(a: Unit, b: Unit) -> String:
+	var defs: Dictionary = fusion_defs.get(a.owner, {})
+	for fusion_id in defs.keys():
+		var elements: Array = defs[fusion_id].get("elements", [])
+		if elements.size() != 2:
+			continue
+		var e0: String = str(elements[0])
+		var e1: String = str(elements[1])
+		if (e0 == a.unit_id and e1 == b.unit_id) or (e0 == b.unit_id and e1 == a.unit_id):
+			return str(fusion_id)
+	return ""
+
+
+func can_fuse(unit: Unit, target: Unit) -> Dictionary:
+	if unit.owner != current_player:
+		return {"ok": false, "reason": "сейчас ход другого игрока"}
+	if str(factions.get(unit.owner, "")) != "elemental":
+		return {"ok": false, "reason": "слияние доступно только Эфиральду"}
+	if not unit.activated:
+		return {"ok": false, "reason": "фигура не активирована"}
+	if target == null or target == unit or target.owner != unit.owner:
+		return {"ok": false, "reason": "цель — другой ваш элементаль"}
+	if not _is_elemental(unit) or not _is_elemental(target):
+		return {"ok": false, "reason": "сливать можно только элементалей"}
+	if board.distance(unit.coord, target.coord) != 1:
+		return {"ok": false, "reason": "элементали должны быть соседними"}
+	if _fusion_for(unit, target) == "":
+		return {"ok": false, "reason": "нет слияния для этой пары"}
+	return {"ok": true, "reason": ""}
+
+
+## Слить двух соседних элементалей в слияние на месте цели.
+func fuse(unit: Unit, target: Unit) -> Dictionary:
+	var verdict := can_fuse(unit, target)
+	if not verdict["ok"]:
+		return verdict
+	var fusion_id := _fusion_for(unit, target)
+	var def: Dictionary = fusion_defs[unit.owner].get(fusion_id, {})
+	var cell := target.coord
+	var owner := unit.owner
+	unit.acted = true
+	_remove(unit)
+	_remove(target)
+	var fusion_unit := add_unit_from_data(owner, cell, def)
+	fusion_unit.no_wound = true
+	fusion_unit.fusion = true
+	return {"ok": true, "reason": "%s создано" % str(def.get("name", fusion_id))}
 
 
 # --- Бой --------------------------------------------------------------------
@@ -892,6 +952,11 @@ func graveyard_of(player: int) -> Array[Unit]:
 ## Зарегистрировать призываемых фигур (id -> данные). Зовётся при расстановке.
 func register_summonables(player: int, defs: Dictionary) -> void:
 	summon_defs[player] = defs
+
+
+## Зарегистрировать слияния Эфиральда (id -> данные).
+func register_fusions(player: int, defs: Dictionary) -> void:
+	fusion_defs[player] = defs
 
 
 ## Цена призыва/воскрешения по классу: пешка 2, командир 3. Король — нельзя

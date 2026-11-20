@@ -7,6 +7,8 @@ class_name Unit
 var owner: int
 var coord: Vector2i
 var name_ru: String = ""
+## Идентификатор из фракционного листа (нужен для слияний Эфиральда).
+var unit_id: String = ""
 var kind: String = "pawn"      # king / commander / pawn
 var move: int = 2
 var mp_left: int = 2           # остаток передвижения в текущем ходу
@@ -18,6 +20,9 @@ var water_walk: bool = false
 var abilities: Array[String] = []
 ## Текст способности с карты персонажа — для подсказки в интерфейсе.
 var ability_text: String = ""
+## Эфиральд: элементаль (участвует в слиянии) и слияние (уже слит).
+var elemental: bool = false
+var fusion: bool = false
 
 var wounded: bool = false
 ## Разовое усиление брони (биомасса, ADR-015): +1 к защите в ответ на атаку.
@@ -47,6 +52,7 @@ func _init(owner_id: int, at: Vector2i, can_walk_water: bool = false) -> void:
 static func from_data(owner_id: int, at: Vector2i, data: Dictionary) -> Unit:
 	var unit := Unit.new(owner_id, at, bool(data.get("water_walk", false)))
 	unit.name_ru = str(data.get("name", ""))
+	unit.unit_id = str(data.get("id", ""))
 	unit.kind = str(data.get("kind", "pawn"))
 	unit.move = int(data.get("move", 2))
 	unit.mp_left = unit.move
@@ -54,6 +60,9 @@ static func from_data(owner_id: int, at: Vector2i, data: Dictionary) -> Unit:
 	unit.armor = int(data.get("armor", 0))
 	unit.range = int(data.get("range", 1))
 	unit.can_attack = bool(data.get("can_attack", true))
+	unit.no_wound = bool(data.get("no_wound", false))
+	unit.elemental = bool(data.get("elemental", false))
+	unit.fusion = bool(data.get("fusion", false))
 	unit.ability_text = str(data.get("text", ""))
 	for ability in data.get("abilities", []):
 		unit.abilities.append(str(ability))

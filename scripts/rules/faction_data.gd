@@ -43,3 +43,12 @@ static func summonables(faction: Dictionary) -> Dictionary:
 		if bool(data.get("summonable", false)):
 			result[str(data.get("id", ""))] = data
 	return result
+
+
+## Слияния Эфиральда: id -> данные (у них флаг fusion).
+static func fusions(faction: Dictionary) -> Dictionary:
+	var result := {}
+	for data in unit_defs(faction):
+		if bool(data.get("fusion", false)):
+			result[str(data.get("id", ""))] = data
+	return result
